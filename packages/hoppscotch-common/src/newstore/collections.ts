@@ -17,6 +17,13 @@ import { getService } from "~/modules/dioc"
 import { getI18n } from "~/modules/i18n"
 import { RESTTabService } from "~/services/tab/rest"
 import DispatchingStore, { defineDispatchers } from "./DispatchingStore"
+import {
+  LiveSyncCollection,
+  ExtendedLiveCollectionMetadata,
+  FrameworkInfo,
+  CollectionCustomizations,
+  SyncConflict,
+} from "~/types/live-collection-metadata"
 
 const defaultRESTCollectionState = {
   state: [
@@ -176,6 +183,13 @@ function reorderItems(array: unknown[], from: number, to: number) {
   } else {
     array.splice(to, 0, item)
   }
+}
+
+// Helper function to check if a collection has live sync metadata
+function isLiveSyncCollection(
+  collection: HoppCollection
+): collection is LiveSyncCollection {
+  return "liveMetadata" in collection && collection.liveMetadata !== undefined
 }
 
 const restCollectionDispatchers = defineDispatchers({
@@ -807,6 +821,240 @@ const restCollectionDispatchers = defineDispatchers({
       state: after,
     }
   },
+
+  // Live Sync Actions for Code-First Collections
+
+  /**
+   * Set live sync metadata for a collection
+   */
+  setLiveMetadata(
+    { state }: RESTCollectionStoreType,
+    {
+      collectionIndex,
+      metadata,
+    }: {
+      collectionIndex: number
+      metadata: ExtendedLiveCollectionMetadata
+    }
+  ) {
+    return {
+      state: state.map((col, index) =>
+        index === collectionIndex
+          ? ({
+              ...col,
+              liveMetadata: {
+                ...((col as LiveSyncCollection).liveMetadata || {}),
+                ...cloneDeep(metadata),
+                updatedAt: new Date(),
+              },
+            } as LiveSyncCollection)
+          : col
+      ),
+    }
+  },
+
+  /**
+   * Update framework information for a collection
+   */
+  updateFrameworkInfo(
+    { state }: RESTCollectionStoreType,
+    {
+      collectionIndex,
+      framework,
+    }: {
+      collectionIndex: number
+      framework: FrameworkInfo
+    }
+  ) {
+    return {
+      state: state.map((col, index) =>
+        index === collectionIndex
+          ? ({
+              ...col,
+              liveMetadata: {
+                ...((col as LiveSyncCollection).liveMetadata || {}),
+                framework: cloneDeep(framework),
+                updatedAt: new Date(),
+              },
+            } as LiveSyncCollection)
+          : col
+      ),
+    }
+  },
+
+  /**
+   * Track user customizations for intelligent merging
+   */
+  trackCustomization(
+    { state }: RESTCollectionStoreType,
+    {
+      collectionIndex,
+      customizationType,
+      itemPath,
+      customizationData,
+    }: {
+      collectionIndex: number
+      customizationType: "request" | "collection" | "folder"
+      itemPath?: string
+      customizationData: any
+    }
+  ) {
+    return {
+      state: state.map((col, index) => {
+        if (index !== collectionIndex) return col
+
+        const liveSyncCol = col as LiveSyncCollection
+        const existingCustomizations =
+          liveSyncCol.liveMetadata?.customizations || {}
+
+        let updatedCustomizations: CollectionCustomizations
+
+        switch (customizationType) {
+          case "request":
+            updatedCustomizations = {
+              ...existingCustomizations,
+              requests: {
+                ...existingCustomizations.requests,
+                [itemPath!]: {
+                  ...existingCustomizations.requests?.[itemPath!],
+                  ...customizationData,
+                  customizedAt: new Date(),
+                },
+              },
+            }
+            break
+          case "collection":
+            updatedCustomizations = {
+              ...existingCustomizations,
+              collection: {
+                ...existingCustomizations.collection,
+                ...customizationData,
+                customizedAt: new Date(),
+              },
+            }
+            break
+          case "folder":
+            updatedCustomizations = {
+              ...existingCustomizations,
+              folders: {
+                ...existingCustomizations.folders,
+                [itemPath!]: {
+                  ...existingCustomizations.folders?.[itemPath!],
+                  ...customizationData,
+                  customizedAt: new Date(),
+                },
+              },
+            }
+            break
+          default:
+            updatedCustomizations = existingCustomizations
+        }
+
+        return {
+          ...col,
+          liveMetadata: {
+            ...liveSyncCol.liveMetadata,
+            customizations: updatedCustomizations,
+            updatedAt: new Date(),
+          },
+        } as LiveSyncCollection
+      }),
+    }
+  },
+
+  /**
+   * Update sync status and metadata after a sync operation
+   */
+  updateSyncStatus(
+    { state }: RESTCollectionStoreType,
+    {
+      collectionIndex,
+      syncResult,
+      conflicts,
+    }: {
+      collectionIndex: number
+      syncResult: {
+        success: boolean
+        specHash?: string
+        changesSummary?: string[]
+      }
+      conflicts?: SyncConflict[]
+    }
+  ) {
+    return {
+      state: state.map((col, index) => {
+        if (index !== collectionIndex) return col
+
+        const liveSyncCol = col as LiveSyncCollection
+
+        return {
+          ...col,
+          liveMetadata: {
+            ...liveSyncCol.liveMetadata,
+            lastSyncTime: new Date(),
+            originalSpecHash: syncResult.specHash,
+            changeTracking: {
+              ...liveSyncCol.liveMetadata?.changeTracking,
+              lastSpecHash: syncResult.specHash,
+              pendingChanges: [],
+              conflictingChanges: conflicts?.map((c) => c.description) || [],
+            },
+            updatedAt: new Date(),
+          },
+        } as LiveSyncCollection
+      }),
+    }
+  },
+
+  /**
+   * Create a new code-first collection from OpenAPI spec
+   */
+  createCodeFirstCollection(
+    { state }: RESTCollectionStoreType,
+    {
+      collection,
+      sourceId,
+      framework,
+      specHash,
+    }: {
+      collection: HoppCollection
+      sourceId: string
+      framework?: FrameworkInfo
+      specHash?: string
+    }
+  ) {
+    const liveSyncCollection: LiveSyncCollection = {
+      ...collection,
+      liveMetadata: {
+        sourceId,
+        isLiveSync: true,
+        lastSyncTime: new Date(),
+        syncStrategy: "incremental",
+        framework,
+        originalSpecHash: specHash,
+        syncConfig: {
+          autoSync: true,
+          preserveCustomizations: true,
+          conflictResolution: "prompt",
+        },
+        changeTracking: {
+          lastSpecHash: specHash,
+          pendingChanges: [],
+          userModifications: [],
+          conflictingChanges: [],
+        },
+        customizations: {
+          requests: {},
+          collection: {},
+          folders: {},
+        },
+      },
+    }
+
+    return {
+      state: [...state, liveSyncCollection],
+    }
+  },
 })
 
 const gqlCollectionDispatchers = defineDispatchers({
@@ -1181,6 +1429,149 @@ export const restCollections$ = restCollectionStore.subject$.pipe(
 export const graphqlCollections$ = graphqlCollectionStore.subject$.pipe(
   pluck("state")
 )
+
+// Live Sync Helper Functions
+
+/**
+ * Check if a collection is a live sync collection
+ */
+export function isLiveSyncCollection(
+  collection: HoppCollection
+): collection is LiveSyncCollection {
+  return (
+    "liveMetadata" in collection && collection.liveMetadata?.isLiveSync === true
+  )
+}
+
+/**
+ * Get all live sync collections from the store
+ */
+export function getLiveSyncCollections(): LiveSyncCollection[] {
+  return restCollectionStore.value.state.filter(isLiveSyncCollection)
+}
+
+/**
+ * Find a live sync collection by source ID
+ */
+export function findCollectionBySourceId(
+  sourceId: string
+): LiveSyncCollection | null {
+  const collections = getLiveSyncCollections()
+  return (
+    collections.find((col) => col.liveMetadata?.sourceId === sourceId) || null
+  )
+}
+
+/**
+ * Check if a collection has pending changes from code
+ */
+export function hasPendingCodeChanges(collection: LiveSyncCollection): boolean {
+  return (
+    (collection.liveMetadata?.changeTracking?.pendingChanges?.length || 0) > 0
+  )
+}
+
+/**
+ * Check if a collection has user modifications
+ */
+export function hasUserModifications(collection: LiveSyncCollection): boolean {
+  const customizations = collection.liveMetadata?.customizations
+  if (!customizations) return false
+
+  return (
+    Object.keys(customizations.requests || {}).length > 0 ||
+    Object.keys(customizations.folders || {}).length > 0 ||
+    Object.keys(customizations.collection || {}).length > 0
+  )
+}
+
+/**
+ * Get framework icon for display
+ */
+export function getFrameworkIcon(framework?: FrameworkInfo): string {
+  if (!framework) return "code"
+
+  const iconMap: Record<string, string> = {
+    FastAPI: "python",
+    Express: "nodejs",
+    "Spring Boot": "java",
+    "ASP.NET Core": "dotnet",
+    Django: "python",
+    Flask: "python",
+    NestJS: "nodejs",
+    Koa: "nodejs",
+  }
+
+  return iconMap[framework.name] || framework.icon || "code"
+}
+
+/**
+ * Dispatch actions for live sync collections
+ */
+export function setCollectionLiveMetadata(
+  collectionIndex: number,
+  metadata: ExtendedLiveCollectionMetadata
+) {
+  restCollectionStore.dispatch({
+    dispatcher: "setLiveMetadata",
+    payload: { collectionIndex, metadata },
+  })
+}
+
+export function updateCollectionFramework(
+  collectionIndex: number,
+  framework: FrameworkInfo
+) {
+  restCollectionStore.dispatch({
+    dispatcher: "updateFrameworkInfo",
+    payload: { collectionIndex, framework },
+  })
+}
+
+export function trackCollectionCustomization(
+  collectionIndex: number,
+  customizationType: "request" | "collection" | "folder",
+  itemPath: string | undefined,
+  customizationData: any
+) {
+  restCollectionStore.dispatch({
+    dispatcher: "trackCustomization",
+    payload: {
+      collectionIndex,
+      customizationType,
+      itemPath,
+      customizationData,
+    },
+  })
+}
+
+export function updateCollectionSyncStatus(
+  collectionIndex: number,
+  syncResult: {
+    success: boolean
+    specHash?: string
+    changesSummary?: string[]
+  },
+  conflicts?: SyncConflict[]
+) {
+  restCollectionStore.dispatch({
+    dispatcher: "updateSyncStatus",
+    payload: { collectionIndex, syncResult, conflicts },
+  })
+}
+
+export function createCodeFirstCollection(
+  collection: HoppCollection,
+  sourceId: string,
+  framework?: FrameworkInfo,
+  specHash?: string
+) {
+  restCollectionStore.dispatch({
+    dispatcher: "createCodeFirstCollection",
+    payload: { collection, sourceId, framework, specHash },
+  })
+}
+subject$.pipe(pluck("state"))
 
 export function appendRESTCollections(entries: HoppCollection[]) {
   restCollectionStore.dispatch({
