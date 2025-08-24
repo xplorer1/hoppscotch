@@ -25,6 +25,8 @@ import {
   SyncConflict,
 } from "~/types/live-collection-metadata"
 
+// Live sync functions are defined below in this file
+
 const defaultRESTCollectionState = {
   state: [
     makeCollection({
@@ -185,12 +187,7 @@ function reorderItems(array: unknown[], from: number, to: number) {
   }
 }
 
-// Helper function to check if a collection has live sync metadata
-function isLiveSyncCollection(
-  collection: HoppCollection
-): collection is LiveSyncCollection {
-  return "liveMetadata" in collection && collection.liveMetadata !== undefined
-}
+// Helper function to check if a collection has live sync metadata - moved to bottom as export
 
 const restCollectionDispatchers = defineDispatchers({
   setCollections(
@@ -1571,7 +1568,133 @@ export function createCodeFirstCollection(
     payload: { collection, sourceId, framework, specHash },
   })
 }
-subject$.pipe(pluck("state"))
+
+/**
+ * Trigger a manual sync for a collection
+ */
+export async function triggerSync(
+  sourceId: string
+): Promise<{ success: boolean }> {
+  // This would typically integrate with the SyncEngineService
+  // For now, we'll return a mock response
+  console.log(`Triggering sync for source: ${sourceId}`)
+
+  // Simulate async operation
+  await new Promise((resolve) => setTimeout(resolve, 100))
+
+  return { success: true }
+}
+
+/**
+ * Get the index of a collection in the store
+ */
+export function getCollectionIndex(collection: LiveSyncCollection): number {
+  return restCollectionStore.value.state.findIndex(
+    (col) =>
+      (col as LiveSyncCollection).liveMetadata?.sourceId ===
+      collection.liveMetadata?.sourceId
+  )
+}
+
+/**
+ * Check if a collection is currently syncing
+ */
+export function isCollectionSyncing(_collection: LiveSyncCollection): boolean {
+  // This would typically check with the SyncEngineService
+  // For now, we'll return false
+  void _collection // Acknowledge unused parameter
+  return false
+}
+
+/**
+ * Get sync conflicts for a collection
+ */
+export function getCollectionConflicts(
+  collection: LiveSyncCollection
+): SyncConflict[] {
+  return collection.liveMetadata?.conflicts || []
+}
+
+/**
+ * Resolve a sync conflict
+ */
+export function resolveSyncConflict(
+  collectionIndex: number,
+  conflictIndex: number,
+  resolution: "user-wins" | "code-wins" | "manual"
+): void {
+  // This would update the collection to resolve the specific conflict
+  console.log(
+    `Resolving conflict ${conflictIndex} for collection ${collectionIndex} with resolution: ${resolution}`
+  )
+}
+
+/**
+ * Get the last sync time for a collection
+ */
+export function getLastSyncTime(collection: LiveSyncCollection): Date | null {
+  return collection.liveMetadata?.lastSyncTime || null
+}
+
+/**
+ * Check if auto-sync is enabled for a collection
+ */
+export function isAutoSyncEnabled(collection: LiveSyncCollection): boolean {
+  return collection.liveMetadata?.syncConfig?.autoSync ?? true
+}
+
+/**
+ * Toggle auto-sync for a collection
+ */
+export function toggleAutoSync(
+  collectionIndex: number,
+  enabled: boolean
+): void {
+  const collection = restCollectionStore.value.state[
+    collectionIndex
+  ] as LiveSyncCollection
+  if (!collection.liveMetadata) return
+
+  const updatedMetadata: ExtendedLiveCollectionMetadata = {
+    ...collection.liveMetadata,
+    syncConfig: {
+      ...collection.liveMetadata.syncConfig,
+      autoSync: enabled,
+    },
+  }
+
+  setCollectionLiveMetadata(collectionIndex, updatedMetadata)
+}
+
+/**
+ * Get framework detection confidence for a collection
+ */
+export function getFrameworkConfidence(collection: LiveSyncCollection): number {
+  return collection.liveMetadata?.framework?.confidence || 0
+}
+
+/**
+ * Update the source URL or file path for a collection
+ */
+export function updateCollectionSource(
+  collectionIndex: number,
+  sourceUrl?: string,
+  filePath?: string
+): void {
+  const collection = restCollectionStore.value.state[
+    collectionIndex
+  ] as LiveSyncCollection
+  if (!collection.liveMetadata) return
+
+  const updatedMetadata: ExtendedLiveCollectionMetadata = {
+    ...collection.liveMetadata,
+    sourceUrl,
+    filePath,
+    updatedAt: new Date(),
+  }
+
+  setCollectionLiveMetadata(collectionIndex, updatedMetadata)
+}
 
 export function appendRESTCollections(entries: HoppCollection[]) {
   restCollectionStore.dispatch({

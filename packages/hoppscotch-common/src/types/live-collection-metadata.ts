@@ -62,7 +62,7 @@ export interface CollectionCustomizations {
 /**
  * Extended live collection metadata with framework awareness
  */
-export interface ExtendedLiveCollectionMetadata extends LiveCollectionMetadata {
+export interface ExtendedLiveCollectionMetadata extends Omit<LiveCollectionMetadata, 'customizations'> {
   // Framework detection and awareness
   framework?: FrameworkInfo
   

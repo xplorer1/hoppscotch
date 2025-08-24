@@ -308,6 +308,9 @@ export class LocalStorageLiveSpecStorage implements LiveSpecStorage {
       //   this.getStorageKey(STORAGE_KEYS.SETTINGS),
       //   JSON.stringify(settings)
       // )
+      
+      // Temporary: Acknowledge the parameter to avoid linting error
+      void settings
     } catch (error) {
       console.error('Failed to save live spec settings to localStorage:', error)
       throw error

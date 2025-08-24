@@ -32,10 +32,9 @@ import {
   validateSourceName,
 } from "~/helpers/live-spec-source/validation"
 import {
-  detectFrameworkFromURL,
-  detectFrameworkFromFile,
+  detectFrameworkFromUrl,
+  detectFrameworkFromFilePatterns,
   getFrameworkErrorGuidance,
-  APIFramework,
 } from "~/helpers/live-spec-source/framework-detection"
 import { OpenAPIFetcherImpl, OpenAPIFetcher } from "./openapi-fetcher.service"
 
@@ -399,7 +398,7 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
 
     // Additional validation for file sources (file existence)
     if (type === "file") {
-      return await this.validateFileAccess(config as FileSourceConfig)
+      return await this.validateFileAccess()
     }
 
     return basicValidation
@@ -626,13 +625,15 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
   private detectFramework(
     config: URLSourceConfig | FileSourceConfig,
     type: LiveSpecSourceType
-  ): APIFramework {
+  ): string {
     if (type === "url") {
-      const detection = detectFrameworkFromURL(config as URLSourceConfig)
-      return detection.framework
+      const detection = detectFrameworkFromUrl((config as URLSourceConfig).url)
+      return detection.frameworks[0]?.name || "unknown"
     } else if (type === "file") {
-      const detection = detectFrameworkFromFile(config as FileSourceConfig)
-      return detection.framework
+      const detection = detectFrameworkFromFilePatterns([
+        (config as FileSourceConfig).filePath,
+      ])
+      return detection.frameworks[0]?.name || "unknown"
     }
     return "unknown"
   }
@@ -646,8 +647,13 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
       return ["Source not found"]
     }
 
-    const framework = this.detectFramework(source.config, source.type)
-    return getFrameworkErrorGuidance(framework, error)
+    const frameworkName = this.detectFramework(source.config, source.type)
+
+    if (frameworkName) {
+      return getFrameworkErrorGuidance(frameworkName, error)
+    }
+
+    return ["Unable to provide specific guidance for unknown framework"]
   }
 }
 

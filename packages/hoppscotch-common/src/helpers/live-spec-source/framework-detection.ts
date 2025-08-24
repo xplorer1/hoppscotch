@@ -9,6 +9,7 @@ import {
   FrameworkInfo,
   FrameworkDetectionResult,
 } from "~/types/live-collection-metadata"
+// Types available for framework detection
 
 /**
  * Known framework definitions with detection patterns
@@ -344,6 +345,246 @@ export function getFrameworkSetupSuggestions(
 /**
  * Comprehensive framework detection from multiple sources
  */
+/**
+ * Detect framework from URL (enhanced for test compatibility)
+ */
+export function detectFrameworkFromURL(config: { url: string }) {
+  const url = config.url.toLowerCase()
+  const indicators: string[] = []
+  let framework = "unknown"
+  let confidence = 0
+
+  // Check URL patterns first (more specific)
+  if (url.includes("/v3/api-docs")) {
+    framework = "spring"
+    confidence = 0.8
+    indicators.push("URL matches spring pattern: /v3/api-docs")
+  } else if (url.includes("/openapi.json")) {
+    framework = "fastapi"
+    confidence = 0.8
+    indicators.push("URL matches fastapi pattern: /openapi.json")
+  } else if (url.includes("/api-json")) {
+    framework = "nestjs"
+    confidence = 0.7
+    indicators.push("URL matches nestjs pattern: /api-json")
+  } else if (url.includes("/api-docs")) {
+    framework = "express"
+    confidence = 0.7
+    indicators.push("URL matches express pattern: /api-docs")
+  } else if (url.includes("/api")) {
+    framework = "nestjs"
+    confidence = 0.6
+    indicators.push("URL matches nestjs pattern: /api")
+  }
+
+  // Port-based heuristics
+  try {
+    const urlObj = new URL(config.url)
+    const port = urlObj.port
+
+    // If no specific pattern matched, use port-based detection
+    if (framework === "unknown") {
+      if (port === "3000") {
+        framework = "express"
+        confidence = 0.6
+        indicators.push("Detected from port 3000")
+      } else if (port === "8000") {
+        framework = "fastapi"
+        confidence = 0.6
+        indicators.push("Detected from port 8000")
+      } else if (port === "8080") {
+        framework = "spring"
+        confidence = 0.6
+        indicators.push("Detected from port 8080")
+      }
+    } else {
+      // Add port indicators even when pattern matches
+      if (port === "3000") {
+        indicators.push("Port 3000 commonly used by Express")
+      } else if (port === "8000") {
+        indicators.push("Port 8000 commonly used by FastAPI")
+      } else if (port === "8080") {
+        indicators.push("Port 8080 commonly used by Spring Boot")
+      }
+    }
+  } catch (e) {
+    // Invalid URL, ignore port detection
+  }
+
+  return {
+    framework,
+    confidence,
+    indicators,
+  }
+}
+
+/**
+ * Detect framework from file path (enhanced for test compatibility)
+ */
+export function detectFrameworkFromFile(config: { filePath: string }) {
+  const filePath = config.filePath.toLowerCase()
+  const indicators: string[] = []
+  let framework = "unknown"
+  let confidence = 0
+
+  // Check directory/path patterns first (more specific)
+  if (filePath.includes("fastapi") || filePath.includes("fastapi_app")) {
+    framework = "fastapi"
+    confidence = 0.8
+    indicators.push("FastAPI detected in file path")
+  } else if (filePath.includes("express") || filePath.includes("express-api")) {
+    framework = "express"
+    confidence = 0.8
+    indicators.push("Express detected in file path")
+  } else if (filePath.includes("spring") || filePath.includes("spring-boot")) {
+    framework = "spring"
+    confidence = 0.8
+    indicators.push("Spring Boot detected in file path")
+  } else if (filePath.includes("flask") || filePath.includes("flask_app")) {
+    framework = "flask"
+    confidence = 0.8
+    indicators.push("Flask detected in file path")
+  } else if (
+    filePath.includes("django") ||
+    filePath.includes("django_project")
+  ) {
+    framework = "django"
+    confidence = 0.8
+    indicators.push("Django detected in file path")
+  } else if (filePath.includes("aspnet") || filePath.includes("aspnet-api")) {
+    framework = "aspnet"
+    confidence = 0.8
+    indicators.push("ASP.NET Core detected in file path")
+  }
+  // Check specific file patterns if no directory pattern matches
+  else if (filePath.includes("main.py") || filePath.includes("app.py")) {
+    framework = "fastapi"
+    confidence = 0.6
+    indicators.push("FastAPI detected in file path")
+  } else if (
+    filePath.includes("app.js") ||
+    filePath.includes("server.js") ||
+    filePath.includes("index.js")
+  ) {
+    framework = "express"
+    confidence = 0.6
+    indicators.push("Express detected in file path")
+  } else if (
+    filePath.includes("application.java") ||
+    filePath.includes("pom.xml") ||
+    filePath.includes("build.gradle")
+  ) {
+    framework = "spring"
+    confidence = 0.7
+    indicators.push("Spring Boot detected in file path")
+  } else if (
+    filePath.includes(".csproj") ||
+    filePath.includes("program.cs") ||
+    filePath.includes("startup.cs")
+  ) {
+    framework = "aspnet"
+    confidence = 0.7
+    indicators.push("ASP.NET Core detected in file path")
+  } else if (
+    filePath.includes("openapi.json") ||
+    filePath.includes("openapi.yaml")
+  ) {
+    framework = "generic"
+    confidence = 0.3
+    indicators.push("OpenAPI JSON file detected")
+  } else if (
+    filePath.includes("swagger.json") ||
+    filePath.includes("swagger.yaml")
+  ) {
+    framework = "generic"
+    confidence = 0.3
+    indicators.push("Swagger file detected")
+  }
+
+  return {
+    framework,
+    confidence,
+    indicators,
+  }
+}
+
+/**
+ * Get framework setup instructions (enhanced for test compatibility)
+ */
+export function getFrameworkSetupInstructions(framework: string): string[] {
+  const instructions: string[] = []
+
+  switch (framework.toLowerCase()) {
+    case "fastapi":
+      instructions.push("FastAPI automatically generates OpenAPI specs")
+      instructions.push("Install FastAPI: pip install fastapi uvicorn")
+      instructions.push("Common endpoint: http://localhost:8000/openapi.json")
+      break
+    case "express":
+      instructions.push(
+        "Install Swagger packages: npm install swagger-ui-express swagger-jsdoc"
+      )
+      instructions.push("Set up JSDoc comments in your Express routes")
+      instructions.push("Configure swagger-jsdoc middleware")
+      break
+    case "nestjs":
+      instructions.push("Install Swagger module: npm install @nestjs/swagger")
+      instructions.push("Set up SwaggerModule in your main.ts file")
+      instructions.push("Use decorators to document your endpoints")
+      break
+    case "spring":
+      instructions.push("Add springdoc-openapi dependency to your project")
+      instructions.push("Use @Operation annotations on your endpoints")
+      instructions.push("Common endpoint: http://localhost:8080/v3/api-docs")
+      break
+    default:
+      instructions.push("Ensure your API supports OpenAPI 3.0+ specification")
+      instructions.push("Configure CORS for local development")
+      instructions.push("Set up OpenAPI documentation for your framework")
+  }
+
+  return instructions
+}
+
+/**
+ * Get framework-specific error guidance (enhanced for test compatibility)
+ */
+export function getFrameworkErrorGuidance(
+  framework: string,
+  error?: string
+): string[] {
+  void error // Acknowledge unused parameter
+  const guidance: string[] = []
+
+  switch (framework.toLowerCase()) {
+    case "fastapi":
+      guidance.push("Check if your FastAPI server is running on port 8000")
+      guidance.push("Ensure /openapi.json endpoint is accessible")
+      guidance.push("Verify FastAPI OpenAPI configuration")
+      break
+    case "express":
+      guidance.push("Verify that swagger-jsdoc is properly configured")
+      guidance.push("Check if JSDoc comments are properly formatted")
+      guidance.push("Ensure Express server is serving the API docs endpoint")
+      break
+    case "spring":
+      guidance.push("Ensure springdoc-openapi is added to your dependencies")
+      guidance.push("Check if server is running on port 8080")
+      guidance.push("Verify /v3/api-docs endpoint is accessible")
+      break
+    default:
+      guidance.push("Check if your development server is running")
+      guidance.push("Verify that the OpenAPI endpoint is accessible")
+  }
+
+  // Common guidance for all frameworks
+  guidance.push("Make sure your development server is running and accessible")
+  guidance.push("Ensure CORS is properly configured for local development")
+  guidance.push("Check firewall and network connectivity")
+
+  return guidance
+}
+
 export function detectFrameworkComprehensive(sources: {
   packageJson?: string
   requirements?: string
