@@ -15,6 +15,7 @@ export type ChangeType =
   | 'parameter-added'
   | 'parameter-removed'
   | 'parameter-modified'
+  | 'response-changed'
 
 // Define severity levels for changes
 export type ChangeSeverity = 'breaking' | 'non-breaking' | 'informational'
