@@ -236,7 +236,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   status: "disconnected",
   lastError: undefined,
-  tooltipPosition: "bottom",
+  tooltipPosition: "top",
   size: "md",
 })
 

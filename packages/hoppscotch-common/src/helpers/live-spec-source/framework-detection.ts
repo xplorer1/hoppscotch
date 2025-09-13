@@ -585,6 +585,19 @@ export function getFrameworkErrorGuidance(
   return guidance
 }
 
+/**
+ * Simple framework detection from URL (for component compatibility)
+ */
+export async function detectFramework(url: string): Promise<string | null> {
+  try {
+    const result = detectFrameworkFromUrl(url)
+    return result.frameworks.length > 0 ? result.frameworks[0].name : null
+  } catch (error) {
+    console.warn("Framework detection failed:", error)
+    return null
+  }
+}
+
 export function detectFrameworkComprehensive(sources: {
   packageJson?: string
   requirements?: string

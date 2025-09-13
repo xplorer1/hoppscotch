@@ -20,7 +20,50 @@ export type ChangeType =
 // Define severity levels for changes
 export type ChangeSeverity = 'breaking' | 'non-breaking' | 'informational'
 
-// A single change in the specification
+// Endpoint change types for UI components
+export type EndpointChangeType = 'added' | 'modified' | 'removed'
+
+// Detail about a specific field change
+export interface ChangeDetail {
+  field: string
+  oldValue?: any
+  newValue?: any
+  isBreaking: boolean
+}
+
+// Endpoint parameter information
+export interface EndpointParameter {
+  name: string
+  type: string
+  required: boolean
+}
+
+// New endpoint information for added endpoints
+export interface NewEndpointInfo {
+  summary?: string
+  description?: string
+  parameters?: EndpointParameter[]
+}
+
+// A change to a specific endpoint
+export interface EndpointChange {
+  path: string
+  method: string
+  type: EndpointChangeType
+  isBreaking: boolean
+  summary?: string
+  details?: ChangeDetail[]
+  newEndpoint?: NewEndpointInfo
+}
+
+// Main diff result used by UI components
+export interface SpecDiff {
+  hasChanges: boolean
+  endpoints: EndpointChange[]
+  summary: string
+}
+
+// A single change in the specification (legacy format)
 export interface SpecChange {
     type: ChangeType
     severity: ChangeSeverity
@@ -31,7 +74,7 @@ export interface SpecChange {
     affectedEndpoints?: string[] // Which endpoints are affected by this change
 }
 
-// Result of comparing two specifications
+// Result of comparing two specifications (legacy format)
 export interface SpecDiffResult {
     hasChanges: boolean
     changes: SpecChange[]

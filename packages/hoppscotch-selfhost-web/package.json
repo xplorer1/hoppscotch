@@ -30,6 +30,7 @@
     "@hoppscotch/data": "workspace:^",
     "@hoppscotch/kernel": "workspace:^",
     "@hoppscotch/ui": "0.2.1",
+    "@iconify-json/simple-icons": "1.2.51",
     "@import-meta-env/unplugin": "0.6.0",
     "@tauri-apps/api": "2.1.1",
     "@tauri-apps/plugin-dialog": "2.0.1",

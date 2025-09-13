@@ -2,7 +2,7 @@
  * Live Collection Metadata Types
  * 
  * This module extends the existing collection types with live sync metadata
- * and framework awareness for the API Studio feature.
+ * and framework awareness for the Live Sync feature.
  */
 
 import { HoppCollection } from "@hoppscotch/data"

@@ -41,6 +41,7 @@ import IconOpenAPI from "~icons/lucide/file"
 import IconFolderPlus from "~icons/lucide/folder-plus"
 import IconGithub from "~icons/lucide/github"
 import IconLink from "~icons/lucide/link"
+import IconZap from "~icons/lucide/zap"
 
 import { useReadonlyStream } from "~/composables/stream"
 import IconUser from "~icons/lucide/user"
@@ -58,6 +59,7 @@ import { ImporterOrExporter } from "~/components/importExport/types"
 import { GistSource } from "~/helpers/import-export/import/import-sources/GistSource"
 import { TeamWorkspace } from "~/services/workspace.service"
 import { invokeAction } from "~/helpers/actions"
+import LiveSyncImporterComponent from "./LiveSyncImporter.vue"
 
 const isPostmanImporterInProgress = ref(false)
 const isInsomniaImporterInProgress = ref(false)
@@ -66,6 +68,7 @@ const isRESTImporterInProgress = ref(false)
 const isAllCollectionImporterInProgress = ref(false)
 const isHarImporterInProgress = ref(false)
 const isGistImporterInProgress = ref(false)
+const isLiveSyncImporterInProgress = ref(false)
 
 const t = useI18n()
 const toast = useToast()
@@ -678,6 +681,66 @@ const HARImporter: ImporterOrExporter = {
   }),
 }
 
+const LiveSyncImporterConfig: ImporterOrExporter = {
+  metadata: {
+    id: "live_sync",
+    name: "import.connect_to_development_server",
+    title: "import.live_sync_description",
+    icon: IconZap,
+    disabled: false,
+    applicableTo: ["personal-workspace", "team-workspace"],
+    format: "live-sync",
+  },
+  importSummary: currentImportSummary,
+  component: defineStep("live_sync_import", LiveSyncImporterComponent, () => ({
+    isLoading: isLiveSyncImporterInProgress.value,
+    async onSetupComplete(source) {
+      isLiveSyncImporterInProgress.value = true
+
+      try {
+        // The live sync setup is complete, but we don't import collections immediately
+        // Instead, we show a success message and let the sync engine handle updates
+        toast.success(t("import.live_sync_connected"))
+
+        platform.analytics?.logEvent({
+          type: "HOPP_LIVE_SYNC_SETUP",
+          platform: "rest",
+          framework: source.framework || "unknown",
+          workspaceType: isTeamWorkspace.value ? "team" : "personal",
+        })
+
+        // Don't set import summary since this isn't a traditional import
+        unsetCurrentImportSummary()
+      } catch (e) {
+        toast.error(t("import.live_sync_setup_failed"))
+        unsetCurrentImportSummary()
+      }
+
+      isLiveSyncImporterInProgress.value = false
+    },
+    async onImportComplete(collections) {
+      isLiveSyncImporterInProgress.value = true
+
+      try {
+        await handleImportToStore(collections)
+        setCurrentImportSummary(collections)
+
+        platform.analytics?.logEvent({
+          type: "HOPP_IMPORT_COLLECTION",
+          importer: "live_sync",
+          platform: "rest",
+          workspaceType: isTeamWorkspace.value ? "team" : "personal",
+        })
+      } catch (e) {
+        showImportFailedError()
+        unsetCurrentImportSummary()
+      }
+
+      isLiveSyncImporterInProgress.value = false
+    },
+  })),
+}
+
 const importerModules = computed(() => {
   const enabledImporters = [
     HoppRESTImporter,
@@ -687,6 +750,7 @@ const importerModules = computed(() => {
     HoppInsomniaImporter,
     HoppGistImporter,
     HARImporter,
+    LiveSyncImporterConfig,
   ]
 
   const isTeams = props.collectionsType.type === "team-collections"

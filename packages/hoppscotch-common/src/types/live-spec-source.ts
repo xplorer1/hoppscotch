@@ -1,7 +1,7 @@
 /**
  * Live Specification Source Types
  * 
- * This module defines the core data structures and types for the API Studio
+ * This module defines the core data structures and types for the Live Sync
  * live specification synchronization feature.
  */
 
@@ -39,6 +39,19 @@ export interface FileSourceConfig {
 }
 
 /**
+ * Framework types for development server detection
+ */
+export type FrameworkType = 
+  | 'fastapi' 
+  | 'express' 
+  | 'spring' 
+  | 'aspnet' 
+  | 'django' 
+  | 'flask' 
+  | 'rails' 
+  | 'laravel'
+
+/**
  * Core live specification source interface
  */
 export interface LiveSpecSource {
@@ -52,6 +65,11 @@ export interface LiveSpecSource {
   lastError?: string
   createdAt: Date
   updatedAt: Date
+  // Additional properties used by components
+  url?: string // Direct URL for convenience (when type is 'url')
+  filePath?: string // Direct file path for convenience (when type is 'file')
+  framework?: FrameworkType // Detected framework
+  isActive?: boolean // Whether the source is actively syncing
 }
 
 /**
@@ -96,42 +114,42 @@ export interface LiveSpecSourceService {
    * Register a new live specification source
    */
   registerSource(source: Omit<LiveSpecSource, 'id' | 'createdAt' | 'updatedAt'>): Promise<LiveSpecSource>
-  
+
   /**
    * Unregister and remove a live specification source
    */
   unregisterSource(sourceId: string): Promise<void>
-  
+
   /**
    * Get all registered sources
    */
   getSources(): LiveSpecSource[]
-  
+
   /**
    * Get a specific source by ID
    */
   getSource(sourceId: string): LiveSpecSource | null
-  
+
   /**
    * Update source configuration
    */
   updateSource(sourceId: string, updates: Partial<LiveSpecSource>): Promise<LiveSpecSource>
-  
+
   /**
    * Manually trigger synchronization for a source
    */
   syncSource(sourceId: string): Promise<SyncResult>
-  
+
   /**
    * Validate source configuration
    */
   validateSource(config: URLSourceConfig | FileSourceConfig, type: LiveSpecSourceType): Promise<SourceValidationResult>
-  
+
   /**
    * Get sync history for a source
    */
   getSyncHistory(sourceId: string, limit?: number): SyncHistoryEntry[]
-  
+
   /**
    * Clear sync history for a source
    */
@@ -141,7 +159,7 @@ export interface LiveSpecSourceService {
 /**
  * Events emitted by the live spec source service
  */
-export type LiveSpecSourceServiceEvent = 
+export type LiveSpecSourceServiceEvent =
   | { type: 'source-registered'; source: LiveSpecSource }
   | { type: 'source-unregistered'; sourceId: string }
   | { type: 'source-updated'; source: LiveSpecSource }

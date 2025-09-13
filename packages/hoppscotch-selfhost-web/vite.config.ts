@@ -85,7 +85,7 @@ export default defineConfig({
     dedupe: ["vue"],
   },
   plugins: [
-    Inspect(), // go to url -> /__inspect
+    // Inspect(), // go to url -> /__inspect - disabled to avoid HTML proxy issues
     HtmlConfig({
       metas: META_TAGS(ENV),
     }),
@@ -129,6 +129,7 @@ export default defineConfig({
         IconResolver({
           prefix: "icon",
           customCollections: ["hopp", "auth", "brands"],
+          collections: ["simple-icons"],
         }),
         (compName: string) => {
           if (compName.startsWith("Hopp"))

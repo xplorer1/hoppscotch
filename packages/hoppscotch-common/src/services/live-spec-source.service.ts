@@ -1,7 +1,7 @@
 /**
  * Live Specification Source Service
  *
- * This service manages live specification sources for the API Studio feature.
+ * This service manages live specification sources for the Live Sync feature.
  * It provides CRUD operations for sources, handles synchronization, and manages
  * local storage persistence.
  */

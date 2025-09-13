@@ -1478,6 +1478,9 @@ importers:
       '@hoppscotch/ui':
         specifier: 0.2.1
         version: 0.2.1(eslint@8.57.0)(terser@5.39.2)(typescript@5.8.3)(vite@5.4.9(@types/node@22.15.19)(sass@1.80.3)(terser@5.39.2))(vue@3.5.12(typescript@5.8.3))
+      '@iconify-json/simple-icons':
+        specifier: 1.2.51
+        version: 1.2.51
       '@import-meta-env/unplugin':
         specifier: 0.6.0
         version: 0.6.0(@import-meta-env/cli@0.7.0)(webpack-sources@3.2.3)
@@ -4634,6 +4637,9 @@ packages:
 
   '@iconify-json/lucide@1.2.9':
     resolution: {integrity: sha512-4gTg74GLiIPJtt4HrAoQuxRLana085kXBf2BhGDzSpPPg8xkgRemRKhhiZE0qasKyBt/nif67Rvuz/NUFWtvDg==}
+
+  '@iconify-json/simple-icons@1.2.51':
+    resolution: {integrity: sha512-vFH0QEHFG3rt9hZOR3oE/ZfAKFA7cS11UXttD/IphClEbiSTsPbpeeJ4kRYGDBUDmAKhBzk6jxHNG8VipwA69Q==}
 
   '@iconify/types@1.1.0':
     resolution: {integrity: sha512-Jh0llaK2LRXQoYsorIH8maClebsnzTcve+7U3rQUSnC11X4jtPnFuyatqFLvMxZ8MLG8dB4zfHsbPfuvxluONw==}
@@ -18690,6 +18696,10 @@ snapshots:
       '@iconify/types': 2.0.0
 
   '@iconify-json/lucide@1.2.9':
+    dependencies:
+      '@iconify/types': 2.0.0
+
+  '@iconify-json/simple-icons@1.2.51':
     dependencies:
       '@iconify/types': 2.0.0
 
