@@ -184,7 +184,8 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const emit = defineEmits<{
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _emit = defineEmits<{
   close: []
   "apply-changes": []
   "skip-breaking": []

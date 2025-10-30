@@ -10,7 +10,8 @@ import { getService } from "~/modules/dioc"
 import { HoppCollection } from "@hoppscotch/data"
 import { TeamCollection } from "~/helpers/backend/graphql"
 import { parseBytesToJSON } from "~/helpers/functional/json"
-import { MediaType } from "@hoppscotch/kernel"
+// Fallback type if kernel MediaType is unavailable
+type MediaType = string
 
 const persistenceService = getService(PersistenceService)
 

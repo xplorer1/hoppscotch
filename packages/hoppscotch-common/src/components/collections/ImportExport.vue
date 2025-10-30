@@ -60,6 +60,7 @@ import { GistSource } from "~/helpers/import-export/import/import-sources/GistSo
 import { TeamWorkspace } from "~/services/workspace.service"
 import { invokeAction } from "~/helpers/actions"
 import LiveSyncImporterComponent from "./LiveSyncImporter.vue"
+import { liveSyncOrchestratorService } from "~/services/live-sync-orchestrator.service"
 
 const isPostmanImporterInProgress = ref(false)
 const isInsomniaImporterInProgress = ref(false)
@@ -684,12 +685,12 @@ const HARImporter: ImporterOrExporter = {
 const LiveSyncImporterConfig: ImporterOrExporter = {
   metadata: {
     id: "live_sync",
-    name: "import.connect_to_development_server",
-    title: "import.live_sync_description",
+    name: "Live Sync",
+    title: "Connect to Development Server",
     icon: IconZap,
     disabled: false,
     applicableTo: ["personal-workspace", "team-workspace"],
-    format: "live-sync",
+    format: "openapi",
   },
   importSummary: currentImportSummary,
   component: defineStep("live_sync_import", LiveSyncImporterComponent, () => ({
@@ -698,9 +699,94 @@ const LiveSyncImporterConfig: ImporterOrExporter = {
       isLiveSyncImporterInProgress.value = true
 
       try {
-        // The live sync setup is complete, but we don't import collections immediately
-        // Instead, we show a success message and let the sync engine handle updates
-        toast.success(t("import.live_sync_connected"))
+        // Use the existing OpenAPI importer to ensure correct data structure
+        try {
+          const url = source.config?.url || ""
+          if (!url) throw new Error("Empty URL for live sync source")
+
+          const response = await fetch(url, {
+            headers: {
+              Accept:
+                "application/json, application/x-yaml, text/yaml, text/plain",
+            },
+          })
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+          }
+
+          const openApiSpecText = await response.text()
+
+          // Use Hoppscotch's built-in OpenAPI importer
+          const { hoppOpenAPIImporter } = await import(
+            "~/helpers/import-export/import/importers"
+          )
+          // FIX: importer expects an array of spec strings
+          const importResult = await hoppOpenAPIImporter([openApiSpecText])()
+
+          if (importResult._tag === "Right") {
+            const collections = importResult.right
+
+            // Rename the first collection to match the source name
+            if (collections.length > 0) {
+              collections[0].name = source.name
+
+              collections[0].liveMetadata = {
+                sourceId: source.id,
+                lastSyncTime: new Date(),
+                isLiveSync: true,
+                framework: source.framework || "unknown",
+                syncStrategy: source.syncStrategy || "replace-all",
+                customizations: {},
+                originalSpecHash: "", // Will be set by sync engine
+                syncConfig: {
+                  autoSync: true,
+                  syncInterval: source.config.pollInterval || 5000,
+                },
+              }
+            }
+
+            // Actually import the collection to the store
+            await handleImportToStore(collections)
+            setCurrentImportSummary(collections)
+
+            const totalRequests = collections.reduce(
+              (sum, col) => sum + (col.requests?.length || 0),
+              0
+            )
+            toast.success(
+              `Live sync connected! Imported ${totalRequests} endpoints from ${source.name}`
+            )
+
+            try {
+              await liveSyncOrchestratorService.startCompleteLiveSync(
+                source.id,
+                {
+                  pollInterval: source.config.pollInterval || 5000, // Use the configured interval
+                  autoUpdateCollections: true,
+                  preserveUserCustomizations: true,
+                  skipCollectionCreation: true,
+                }
+              )
+              console.log(`Live sync polling started for source: ${source.id}`)
+              toast.success(
+                `Live sync polling started! Monitoring for changes every ${source.config.pollInterval || 5000}ms`
+              )
+            } catch (syncError) {
+              console.error(`Failed to start live sync polling:`, syncError)
+              toast.error("Collection imported but live sync failed to start")
+            }
+          } else {
+            // Importer failed despite a successful fetch
+            throw new Error("OpenAPI import failed")
+          }
+        } catch (err) {
+          // Fallback - connection established but spec could not be imported
+          toast.success(
+            "Live sync connected (unable to import spec, but connection established)"
+          )
+          unsetCurrentImportSummary()
+        }
 
         platform.analytics?.logEvent({
           type: "HOPP_LIVE_SYNC_SETUP",
@@ -709,10 +795,12 @@ const LiveSyncImporterConfig: ImporterOrExporter = {
           workspaceType: isTeamWorkspace.value ? "team" : "personal",
         })
 
-        // Don't set import summary since this isn't a traditional import
-        unsetCurrentImportSummary()
+        // Close the modal after successful setup (with delay to show import summary)
+        setTimeout(() => {
+          emit("hide-modal")
+        }, 3000)
       } catch (e) {
-        toast.error(t("import.live_sync_setup_failed"))
+        toast.error("Live sync setup failed")
         unsetCurrentImportSummary()
       }
 

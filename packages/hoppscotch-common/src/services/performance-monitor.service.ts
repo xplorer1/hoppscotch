@@ -81,7 +81,7 @@ class PerformanceMonitorService {
   endSyncMeasurement(
     sourceId: string,
     spec: any,
-    _success: boolean = true
+    _success: boolean = true // eslint-disable-line @typescript-eslint/no-unused-vars
   ): PerformanceMetrics | null {
     const timer = this.syncTimers.get(sourceId)
     if (!timer) return null
@@ -451,7 +451,7 @@ class PerformanceMonitorService {
 
   private estimateNetworkLatency(
     syncDuration: number,
-    _specSize: number
+    _specSize: number // eslint-disable-line @typescript-eslint/no-unused-vars
   ): number {
     // Rough estimation: assume processing takes 100ms, rest is network
     const processingTime = Math.min(100, syncDuration * 0.1)

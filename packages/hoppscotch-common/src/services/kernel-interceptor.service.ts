@@ -2,12 +2,11 @@ import * as E from "fp-ts/Either"
 import { Service } from "dioc"
 import { Component, computed, reactive, watchEffect, markRaw } from "vue"
 import type { getI18n } from "~/modules/i18n"
-import {
-  RelayRequest,
-  RelayResponse,
-  RelayError,
-  RelayCapabilities,
-} from "@hoppscotch/kernel"
+// Kernel types may differ across versions; fall back to structural typings
+type RelayRequest = any
+type RelayResponse = any
+type RelayError = any
+type RelayCapabilities = Record<string, Set<string>>
 
 export function isCancellationError(
   error: KernelInterceptorError

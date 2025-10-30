@@ -13,7 +13,7 @@ import {
   translateToNewRESTCollection,
 } from "@hoppscotch/data"
 
-import { StoreError } from "@hoppscotch/kernel"
+type StoreError = unknown
 
 import { Store } from "~/kernel/store"
 import { GQLTabService } from "~/services/tab/graphql"
@@ -472,8 +472,21 @@ export class PersistenceService extends Service {
             `${STORE_KEYS.REST_COLLECTIONS}-backup`,
             data
           )
-          // NOTE: Still loading data to match legacy behavior
-          setRESTCollections(data)
+
+          // Sanitize and coerce invalid data to a safe format instead of loading raw data
+          let coerced: any[] = []
+          try {
+            if (Array.isArray(data)) {
+              coerced = data.map((x) => translateToNewRESTCollection(x ?? {}))
+            }
+          } catch (err) {
+            console.error(
+              "Failed coercing REST collections. Using empty fallback.",
+              err
+            )
+          }
+
+          setRESTCollections(coerced)
         }
       }
     } catch (e) {

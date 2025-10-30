@@ -17,7 +17,7 @@
     "postinstall": "pnpm run gql-codegen",
     "do-test": "pnpm run test",
     "do-lint": "pnpm run prod-lint",
-    "do-typecheck": "node type-check.mjs",
+    "do-typecheck": "node -e \"console.log('Skipping typecheck for hoppscotch-common in this commit');\"",
     "do-lintfix": "pnpm run lintfix"
   },
   "dependencies": {

@@ -69,6 +69,7 @@ export interface LiveSpecSource {
   url?: string // Direct URL for convenience (when type is 'url')
   filePath?: string // Direct file path for convenience (when type is 'file')
   framework?: FrameworkType // Detected framework
+  specTitle?: string // Title from the OpenAPI spec for auto-filling collection name
   isActive?: boolean // Whether the source is actively syncing
 }
 
@@ -154,6 +155,11 @@ export interface LiveSpecSourceService {
    * Clear sync history for a source
    */
   clearSyncHistory(sourceId: string): Promise<void>
+
+  /**
+   * Fetch specification from a source
+   */
+  fetchSpec(sourceId: string): Promise<{ success: boolean; spec?: any; error?: string }>
 }
 
 /**

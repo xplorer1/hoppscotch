@@ -36,7 +36,11 @@ import {
   detectFrameworkFromFilePatterns,
   getFrameworkErrorGuidance,
 } from "~/helpers/live-spec-source/framework-detection"
-import { OpenAPIFetcherImpl, OpenAPIFetcher } from "./openapi-fetcher.service"
+import {
+  OpenAPIFetcherImpl,
+  OpenAPIFetcher,
+  FetchOptions,
+} from "./openapi-fetcher.service"
 
 /**
  * Event emitter interface for service events
@@ -654,6 +658,68 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
     }
 
     return ["Unable to provide specific guidance for unknown framework"]
+  }
+
+  /**
+   * Fetch specification from a source
+   */
+  async fetchSpec(
+    sourceId: string
+  ): Promise<{ success: boolean; spec?: any; error?: string }> {
+    const source = this.getSource(sourceId)
+    if (!source) {
+      return { success: false, error: `Source not found: ${sourceId}` }
+    }
+
+    try {
+      if (source.type === "url") {
+        const config = source.config as URLSourceConfig
+        const fetchOptions: FetchOptions = {
+          timeout: config.timeout || 10000,
+          headers: config.headers || {},
+        }
+
+        const result = await this.fetcher.fetchSpec(config.url, fetchOptions)
+
+        if (result.success && result.content) {
+          try {
+            // Parse the spec content as JSON if it's a string
+            const spec =
+              typeof result.content === "string"
+                ? JSON.parse(result.content)
+                : result.content
+            return { success: true, spec }
+          } catch (parseError) {
+            return {
+              success: false,
+              error: "Failed to parse OpenAPI spec as JSON",
+            }
+          }
+        } else {
+          return {
+            success: false,
+            error: result.errors?.[0] || "Failed to fetch spec",
+          }
+        }
+      } else if (source.type === "file") {
+        // File sources not supported in browser environment
+        return {
+          success: false,
+          error: "File sources not supported in browser environment",
+        }
+      } else {
+        return {
+          success: false,
+          error: `Unsupported source type: ${source.type}`,
+        }
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      }
+    }
   }
 }
 

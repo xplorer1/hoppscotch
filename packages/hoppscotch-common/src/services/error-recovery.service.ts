@@ -171,7 +171,7 @@ class ErrorRecoveryService {
         error.errorType === "connection_failed" ||
         error.errorMessage.includes("ECONNREFUSED") ||
         error.errorMessage.includes("fetch failed"),
-      recover: async (source, _error) => {
+      recover: async (source) => {
         try {
           const response = await fetch(source.url || "", { method: "HEAD" })
           return response.ok
@@ -190,7 +190,10 @@ class ErrorRecoveryService {
       canRecover: (error) =>
         error.errorType === "connection_failed" &&
         error.errorMessage.includes("ECONNREFUSED"),
-      recover: async (source, error) => {
+      recover: async (
+        source,
+        _error // eslint-disable-line @typescript-eslint/no-unused-vars
+      ) => {
         const framework = source.framework
         if (!framework || !source.url) return false
 
@@ -234,7 +237,10 @@ class ErrorRecoveryService {
       canRecover: (error) =>
         error.errorMessage.includes("CORS") ||
         error.errorMessage.includes("Access-Control-Allow-Origin"),
-      recover: async (source, error) => {
+      recover: async (
+        source,
+        _error // eslint-disable-line @typescript-eslint/no-unused-vars
+      ) => {
         const framework = source.framework
         if (!framework) return false
 
@@ -270,7 +276,10 @@ class ErrorRecoveryService {
       canRecover: (error) =>
         error.errorType === "spec_not_found" ||
         error.errorMessage.includes("404"),
-      recover: async (source, error) => {
+      recover: async (
+        source,
+        _error // eslint-disable-line @typescript-eslint/no-unused-vars
+      ) => {
         if (!source.url) return false
 
         const framework = source.framework
@@ -366,11 +375,13 @@ class ErrorRecoveryService {
     return false
   }
 
+  // eslint-disable @typescript-eslint/no-unused-vars
   private getSuggestedActions(
     source: LiveSpecSource,
     errorType: string,
-    errorMessage: string
+    _errorMessage: string // eslint-disable-line @typescript-eslint/no-unused-vars
   ): string[] {
+    // eslint-enable @typescript-eslint/no-unused-vars
     const actions: string[] = []
 
     switch (errorType) {
@@ -461,7 +472,7 @@ class ErrorRecoveryService {
 
   private enableGracefulDegradation(
     source: LiveSpecSource,
-    error: ErrorContext
+    _error: ErrorContext // eslint-disable-line @typescript-eslint/no-unused-vars
   ): void {
     changeNotificationService.showToast({
       type: "warning",
@@ -542,6 +553,43 @@ class ErrorRecoveryService {
   private retrySetup(sourceId: string): void {
     // This would reopen the setup wizard
     console.log(`Retrying setup for ${sourceId}`)
+  }
+
+  /**
+   * Handle sync-specific errors (used by polling service)
+   */
+  handleSyncError(
+    sourceId: string,
+    errorInfo: {
+      type: string
+      message: string
+      timestamp: Date
+      retryCount: number
+    }
+  ): void {
+    console.log(`Sync error for ${sourceId}:`, errorInfo)
+
+    // Record the error
+    const errorContext: ErrorContext = {
+      sourceId,
+      errorType: errorInfo.type,
+      errorMessage: errorInfo.message,
+      timestamp: errorInfo.timestamp,
+      retryCount: errorInfo.retryCount,
+      isRecoverable: this.isRecoverableError(errorInfo.type, errorInfo.message),
+      suggestedActions: [],
+    }
+
+    // Record error in internal tracking (if needed for future analysis)
+    // Note: recordError method not yet implemented
+    void errorContext
+
+    // If too many retries, suggest recovery actions
+    if (errorInfo.retryCount >= 3) {
+      console.warn(
+        `Multiple sync errors for ${sourceId}, consider checking source configuration`
+      )
+    }
   }
 }
 

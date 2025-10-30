@@ -451,6 +451,7 @@ function showSourceMenu(source: TeamLiveSource) {
   console.log("Show menu for source:", source)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function showConflictResolution(_sourceId: string) {
   showConflictDialog.value = true
 }

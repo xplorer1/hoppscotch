@@ -359,18 +359,14 @@ export function detectFrameworkFromURL(config: { url: string }) {
     framework = "spring"
     confidence = 0.8
     indicators.push("URL matches spring pattern: /v3/api-docs")
-  } else if (url.includes("/openapi.json")) {
-    framework = "fastapi"
+  } else if (url.includes("/api-docs")) {
+    framework = "express"
     confidence = 0.8
-    indicators.push("URL matches fastapi pattern: /openapi.json")
+    indicators.push("URL matches express pattern: /api-docs")
   } else if (url.includes("/api-json")) {
     framework = "nestjs"
     confidence = 0.7
     indicators.push("URL matches nestjs pattern: /api-json")
-  } else if (url.includes("/api-docs")) {
-    framework = "express"
-    confidence = 0.7
-    indicators.push("URL matches express pattern: /api-docs")
   } else if (url.includes("/api")) {
     framework = "nestjs"
     confidence = 0.6
@@ -382,30 +378,47 @@ export function detectFrameworkFromURL(config: { url: string }) {
     const urlObj = new URL(config.url)
     const port = urlObj.port
 
-    // If no specific pattern matched, use port-based detection
-    if (framework === "unknown") {
+    // Use port-based detection for ambiguous cases like /openapi.json
+    if (framework === "unknown" || url.includes("/openapi.json")) {
       if (port === "3000") {
         framework = "express"
-        confidence = 0.6
-        indicators.push("Detected from port 3000")
+        confidence = 0.7
+        indicators.push(`Detected Express from port ${port}`)
+      } else if (port === "8090") {
+        // Port 8090 is commonly used for Node.js/Express backends
+        framework = "express"
+        confidence = 0.7
+        indicators.push(`Detected Express from port ${port}`)
       } else if (port === "8000") {
         framework = "fastapi"
-        confidence = 0.6
-        indicators.push("Detected from port 8000")
+        confidence = 0.7
+        indicators.push("Detected FastAPI from port 8000")
       } else if (port === "8080") {
         framework = "spring"
-        confidence = 0.6
-        indicators.push("Detected from port 8080")
+        confidence = 0.7
+        indicators.push("Detected Spring Boot from port 8080")
+      } else if (url.includes("/openapi.json")) {
+        // For /openapi.json without specific port indicators, check URL patterns more carefully
+        if (url.includes("/api-docs") || url.includes("/swagger")) {
+          framework = "express"
+          confidence = 0.6
+          indicators.push("Detected Express patterns in URL")
+        } else {
+          // Default to Express for generic /openapi.json endpoints
+          framework = "express"
+          confidence = 0.4
+          indicators.push("Assumed Express for /openapi.json endpoint")
+        }
       }
-    } else {
-      // Add port indicators even when pattern matches
-      if (port === "3000") {
-        indicators.push("Port 3000 commonly used by Express")
-      } else if (port === "8000") {
-        indicators.push("Port 8000 commonly used by FastAPI")
-      } else if (port === "8080") {
-        indicators.push("Port 8080 commonly used by Spring Boot")
-      }
+    }
+
+    // Add port indicators even when pattern matches
+    if (port === "3000" || port === "8090") {
+      indicators.push("Port commonly used by Express")
+    } else if (port === "8000") {
+      indicators.push("Port 8000 commonly used by FastAPI")
+    } else if (port === "8080") {
+      indicators.push("Port 8080 commonly used by Spring Boot")
     }
   } catch (e) {
     // Invalid URL, ignore port detection
@@ -590,8 +603,8 @@ export function getFrameworkErrorGuidance(
  */
 export async function detectFramework(url: string): Promise<string | null> {
   try {
-    const result = detectFrameworkFromUrl(url)
-    return result.frameworks.length > 0 ? result.frameworks[0].name : null
+    const result = detectFrameworkFromURL({ url })
+    return result.framework !== "unknown" ? result.framework : null
   } catch (error) {
     console.warn("Framework detection failed:", error)
     return null

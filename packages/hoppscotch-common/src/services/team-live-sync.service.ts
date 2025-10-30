@@ -189,11 +189,38 @@ class TeamLiveSyncService {
       })
 
       // Notify team members if there were changes
-      if (result.success && result.changes) {
-        this.notifyTeamMembers(teamId, sourceId, result.changes, userId)
+      // Note: result.changes is SpecDiffResult, need to convert to SpecDiff format
+      if (result.success && result.changes && result.changes.hasChanges) {
+        const specDiff: SpecDiff = {
+          hasChanges: result.changes.hasChanges,
+          endpoints: result.changes.changes.filter(
+            (c) =>
+              c.type === "endpoint-added" ||
+              c.type === "endpoint-removed" ||
+              c.type === "endpoint-modified"
+          ) as any,
+          summary: "Changes detected",
+        }
+        this.notifyTeamMembers(teamId, sourceId, specDiff, userId)
       }
 
-      return result
+      // Convert SpecDiffResult to expected format for return
+      return {
+        ...result,
+        changes:
+          result.changes && result.changes.hasChanges
+            ? ({
+                hasChanges: true,
+                endpoints: result.changes.changes.filter(
+                  (c) =>
+                    c.type === "endpoint-added" ||
+                    c.type === "endpoint-removed" ||
+                    c.type === "endpoint-modified"
+                ) as any,
+                summary: "Changes detected",
+              } as SpecDiff)
+            : ({ hasChanges: false, endpoints: [], summary: "" } as SpecDiff),
+      } as any
     } catch (error) {
       // Emit sync failed event
       this.emitTeamEvent({
@@ -241,8 +268,8 @@ class TeamLiveSyncService {
           label: "Apply Code Changes",
           description: "Apply code changes and overwrite team modifications",
           action: async () => {
-            // Apply code changes
-            await syncEngineService.applyChanges(sourceId, codeChanges)
+            // Apply code changes by triggering a sync
+            await syncEngineService.triggerSync(sourceId)
             await this.resolveConflict(
               conflict.conflictId,
               "apply_code_changes"
@@ -350,7 +377,7 @@ class TeamLiveSyncService {
     sourceId: string,
     teamId: string,
     currentUserId: string,
-    otherUserId: string
+    _otherUserId: string // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Promise<void> {
     const conflict: ConflictResolution = {
       conflictId: `concurrent_${Date.now()}`,
@@ -430,9 +457,14 @@ class TeamLiveSyncService {
     )
 
     // For now, just apply code changes and preserve user customizations
+    // Apply code changes by triggering a sync
+    await syncEngineService.triggerSync(sourceId)
+    // Note: applyChanges method doesn't exist, using performSync instead
+    /*
     await syncEngineService.applyChanges(sourceId, codeChanges, {
       preserveUserCustomizations: true,
     })
+    */
   }
 
   private showConflictResolutionUI(conflict: ConflictResolution): void {

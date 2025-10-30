@@ -6,8 +6,8 @@
           <component :is="frameworkIconComponent" class="framework-icon" />
         </div>
         <div class="header-text">
-          <h3>{{ t("import.connect_to_development_server") }}</h3>
-          <p>{{ t("import.live_sync_description") }}</p>
+          <h3>Live Sync Setup</h3>
+          <p>Connect to your API for real-time updates</p>
         </div>
       </div>
     </div>
@@ -22,8 +22,8 @@
           >
             <IconLink class="option-icon" />
             <div class="option-content">
-              <h4>{{ t("import.development_server_url") }}</h4>
-              <p>{{ t("import.connect_to_running_server") }}</p>
+              <h4>Development Server</h4>
+              <p>Connect to your running API server</p>
             </div>
           </button>
 
@@ -34,8 +34,8 @@
           >
             <IconFile class="option-icon" />
             <div class="option-content">
-              <h4>{{ t("import.generated_spec_file") }}</h4>
-              <p>{{ t("import.watch_local_file") }}</p>
+              <h4>Local Spec File</h4>
+              <p>Watch a local OpenAPI file</p>
             </div>
           </button>
         </div>
@@ -43,7 +43,7 @@
         <div v-if="connectionType" class="connection-form">
           <div v-if="connectionType === 'url'" class="url-form">
             <div class="form-group">
-              <label>{{ t("import.server_url") }}</label>
+              <label>Server URL</label>
               <input
                 v-model="serverUrl"
                 type="url"
@@ -56,24 +56,21 @@
               </div>
             </div>
 
-            <div class="framework-detection">
+            <div class="framework-detection mt-3">
               <div v-if="detectedFramework" class="detected-framework">
                 <component :is="getFrameworkIconComponent(detectedFramework)" />
-                <span
-                  >{{ t(`frameworks.${detectedFramework}`) }}
-                  {{ t("import.detected") }}</span
-                >
+                <span>{{ detectedFramework }} detected</span>
               </div>
               <div v-else-if="isDetecting" class="detecting">
                 <IconLoader class="animate-spin" />
-                <span>{{ t("import.detecting_framework") }}</span>
+                <span>Detecting framework...</span>
               </div>
             </div>
           </div>
 
           <div v-if="connectionType === 'file'" class="file-form">
             <div class="form-group">
-              <label>{{ t("import.spec_file_path") }}</label>
+              <label>Spec File Path</label>
               <div class="file-input-wrapper">
                 <input
                   v-model="filePath"
@@ -84,7 +81,7 @@
                 />
                 <button class="browse-button" @click="browseFile">
                   <IconFolder />
-                  {{ t("action.browse") }}
+                  Browse
                 </button>
               </div>
               <div v-if="fileError" class="error-message">
@@ -95,7 +92,7 @@
             <div class="file-info">
               <div class="info-item">
                 <IconInfo />
-                <span>{{ t("import.file_watch_info") }}</span>
+                <span>File changes detected automatically</span>
               </div>
             </div>
           </div>
@@ -108,7 +105,7 @@
             >
               <IconLoader v-if="isTesting" class="animate-spin" />
               <IconZap v-else />
-              {{ t("import.test_connection") }}
+              Test Connection
             </button>
 
             <button
@@ -117,7 +114,7 @@
               @click="proceedToSetup"
             >
               <IconArrowRight />
-              {{ t("action.continue") }}
+              Continue
             </button>
           </div>
         </div>
@@ -146,7 +143,7 @@
         v-if="connectionResult.success && connectionResult.preview"
         class="preview"
       >
-        <h4>{{ t("import.preview_collections") }}</h4>
+        <h4>Preview Collections</h4>
         <div class="preview-list">
           <div
             v-for="collection in connectionResult.preview"
@@ -156,7 +153,7 @@
             <IconFolder />
             <span>{{ collection.name }}</span>
             <span class="endpoint-count">
-              {{ collection.requests?.length || 0 }} {{ t("import.endpoints") }}
+              {{ collection.requests?.length || 0 }} endpoints
             </span>
           </div>
         </div>
@@ -166,8 +163,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue"
-import { useI18n } from "~/composables/i18n"
+import { computed, ref, watch } from "vue"
+// import { useI18n } from "~/composables/i18n"
 import { useToast } from "~/composables/toast"
 import type {
   LiveSpecSource,
@@ -195,19 +192,22 @@ import IconMicrosoft from "~icons/simple-icons/microsoft"
 
 interface Props {
   isLoading?: boolean
+  onSetupComplete?: (source: LiveSpecSource) => Promise<void>
+  onImportComplete?: (collections: HoppCollection[]) => Promise<void>
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   isLoading: false,
+  onSetupComplete: undefined,
+  onImportComplete: undefined,
 })
 
-defineEmits<{
-  "import-complete": [collections: HoppCollection[]]
-  "setup-complete": [source: LiveSpecSource]
-  cancel: []
+const emit = defineEmits<{
+  (e: "import-complete", collections: HoppCollection[]): void
+  (e: "setup-complete", source: LiveSpecSource): void
+  (e: "cancel"): void
 }>()
 
-const t = useI18n()
 const toast = useToast()
 
 // State
@@ -224,6 +224,7 @@ const connectionResult = ref<{
   success: boolean
   message: string
   preview?: HoppCollection[]
+  specTitle?: string
 } | null>(null)
 
 // Computed
@@ -254,6 +255,7 @@ const initialConfig = computed((): Partial<LiveSpecSource> => {
     url: connectionType.value === "url" ? serverUrl.value : undefined,
     filePath: connectionType.value === "file" ? filePath.value : undefined,
     framework: detectedFramework.value || undefined,
+    specTitle: connectionResult.value?.specTitle || undefined,
   }
 })
 
@@ -324,7 +326,7 @@ async function validateUrl() {
   try {
     new URL(serverUrl.value)
   } catch {
-    urlError.value = t("import.invalid_url")
+    urlError.value = "Invalid URL format"
     return
   }
 
@@ -354,7 +356,8 @@ function validateFile() {
 
   // Basic file path validation
   if (!filePath.value.match(/\.(json|yaml|yml)$/i)) {
-    fileError.value = t("import.invalid_file_format")
+    fileError.value =
+      "Invalid file format. Please use .json, .yaml, or .yml files"
     return
   }
 }
@@ -362,7 +365,7 @@ function validateFile() {
 function browseFile() {
   // This would open a file browser dialog
   // Implementation depends on the platform (electron, web, etc.)
-  toast.info(t("import.file_browser_not_available"))
+  toast.info("File browser not available in web version")
 }
 
 async function testConnection() {
@@ -380,8 +383,7 @@ async function testConnection() {
   } catch (error) {
     connectionResult.value = {
       success: false,
-      message:
-        error instanceof Error ? error.message : t("import.connection_failed"),
+      message: error instanceof Error ? error.message : "Connection failed",
     }
   } finally {
     isTesting.value = false
@@ -408,20 +410,24 @@ async function testUrlConnection() {
 
     // Basic OpenAPI validation
     if (!spec.openapi && !spec.swagger) {
-      throw new Error(t("import.invalid_openapi_spec"))
+      throw new Error("Invalid OpenAPI specification")
     }
 
     // Generate preview collections
     const preview = await generatePreview(spec)
 
+    // Auto-fill collection name from OpenAPI spec
+    const specTitle = spec.info?.title
+
     connectionResult.value = {
       success: true,
-      message: t("import.connection_successful"),
+      message: "Connection successful",
       preview,
+      specTitle, // Include for the setup wizard
     }
   } catch (error) {
     throw new Error(
-      error instanceof Error ? error.message : t("import.failed_to_fetch_spec")
+      error instanceof Error ? error.message : "Failed to fetch specification"
     )
   }
 }
@@ -434,10 +440,10 @@ async function testFileConnection() {
     // but we can validate the path format
     connectionResult.value = {
       success: true,
-      message: t("import.file_path_valid"),
+      message: "File path is valid",
     }
   } catch (error) {
-    throw new Error(t("import.invalid_file_path"))
+    throw new Error("Invalid file path")
   }
 }
 
@@ -476,11 +482,16 @@ function proceedToSetup() {
   showSetupWizard.value = true
 }
 
-function handleSetupComplete(source: LiveSpecSource) {
+async function handleSetupComplete(source: LiveSpecSource) {
   showSetupWizard.value = false
-  emit("setup-complete", source)
 
-  toast.success(t("import.live_sync_setup_complete"))
+  // Call the prop function if provided
+  if (props.onSetupComplete) {
+    await props.onSetupComplete(source)
+  }
+
+  // Also emit for backward compatibility
+  emit("setup-complete", source)
 }
 
 function handleSetupCancel() {
@@ -526,7 +537,7 @@ watch(filePath, validateFile)
 }
 
 .option-grid {
-  @apply grid grid-cols-1 md:grid-cols-2 gap-4;
+  @apply grid grid-cols-1 gap-4;
 }
 
 .connection-option {
@@ -546,11 +557,11 @@ watch(filePath, validateFile)
 }
 
 .option-content h4 {
-  @apply font-semibold mb-1;
+  @apply font-semibold mb-2;
 }
 
 .option-content p {
-  @apply text-sm text-gray-600 dark:text-gray-400;
+  @apply text-sm text-gray-600 dark:text-gray-400 leading-relaxed;
 }
 
 .connection-form {

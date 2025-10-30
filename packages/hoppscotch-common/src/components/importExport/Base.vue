@@ -200,8 +200,8 @@ props.importerModules.forEach((importer) => {
       id: `import_summary_${importer.metadata.id}`,
       component: ImportSummary,
       props: () => ({
-        collections: importSummary.value.importedCollections,
-        importFormat: importer.metadata.format,
+        collections: importSummary.value.importedCollections ?? [],
+        importFormat: (importer.metadata.format ?? "openapi") as any,
         "on-close": () => {
           emit("hide-modal")
         },

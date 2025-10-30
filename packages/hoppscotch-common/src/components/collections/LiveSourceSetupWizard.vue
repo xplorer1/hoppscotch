@@ -1,29 +1,29 @@
 <template>
   <div class="live-source-setup-wizard">
     <div class="wizard-header">
-      <h3>{{ t("import.setup_live_sync") }}</h3>
-      <p>{{ t("import.configure_live_source") }}</p>
+      <h3>Setup Live Sync</h3>
+      <p>Configure your live synchronization settings</p>
     </div>
 
     <div class="wizard-content">
       <div class="setup-form">
         <div class="form-group">
-          <label>{{ t("import.collection_name") }}</label>
+          <label>Collection Name</label>
           <input
             v-model="config.collectionName"
             type="text"
-            :placeholder="t('import.collection_name_placeholder')"
+            placeholder="Enter a name for this live sync collection"
             class="form-input"
           />
         </div>
 
         <div class="form-group">
-          <label>{{ t("import.sync_frequency") }}</label>
+          <label>Sync Frequency</label>
           <select v-model="config.syncFrequency" class="form-select">
-            <option value="realtime">{{ t("import.realtime") }}</option>
-            <option value="5s">{{ t("import.every_5_seconds") }}</option>
-            <option value="30s">{{ t("import.every_30_seconds") }}</option>
-            <option value="manual">{{ t("import.manual_only") }}</option>
+            <option value="realtime">Real-time</option>
+            <option value="5s">Every 5 seconds</option>
+            <option value="30s">Every 30 seconds</option>
+            <option value="manual">Manual only</option>
           </select>
         </div>
 
@@ -34,10 +34,10 @@
               type="checkbox"
               class="form-checkbox"
             />
-            {{ t("import.preserve_customizations") }}
+            Preserve Customizations
           </label>
           <p class="help-text">
-            {{ t("import.preserve_customizations_help") }}
+            Keep your custom headers, auth, and scripts when syncing
           </p>
         </div>
 
@@ -48,23 +48,23 @@
               type="checkbox"
               class="form-checkbox"
             />
-            {{ t("import.auto_import_changes") }}
+            Auto Import Changes
           </label>
-          <p class="help-text">{{ t("import.auto_import_changes_help") }}</p>
+          <p class="help-text">
+            Automatically import new endpoints when detected
+          </p>
         </div>
       </div>
 
       <div class="wizard-actions">
-        <button class="btn btn-secondary" @click="handleCancel">
-          {{ t("action.cancel") }}
-        </button>
+        <button class="btn btn-secondary" @click="handleCancel">Cancel</button>
         <button
           :disabled="!canSetup || isLoading"
           class="btn btn-primary"
           @click="handleSetup"
         >
           <icon v-if="isLoading" name="loader" class="animate-spin" />
-          {{ t("import.setup_live_sync") }}
+          Setup Live Sync
         </button>
       </div>
     </div>
@@ -72,8 +72,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from "vue"
-import { useI18n } from "@composables/i18n"
+import { computed, reactive, watch } from "vue"
+// import { useI18n } from "@composables/i18n"
 import type { LiveSpecSource } from "../../types/live-spec-source"
 import { liveSpecSourceService } from "../../services/live-spec-source.service"
 
@@ -87,15 +87,19 @@ const props = withDefaults(defineProps<Props>(), {
   isLoading: false,
 })
 
+// Define emits explicitly
 const emit = defineEmits<{
-  "setup-complete": [source: LiveSpecSource]
-  cancel: []
+  (e: "setup-complete", source: LiveSpecSource): void
+  (e: "cancel"): void
 }>()
 
-const t = useI18n()
+// const t = useI18n()
+
+// Store emit function to avoid scoping issues
 
 const config = reactive({
-  collectionName: props.initialConfig?.name || "",
+  collectionName:
+    props.initialConfig?.name || props.initialConfig?.specTitle || "",
   syncFrequency: "realtime",
   preserveCustomizations: true,
   autoImport: true,
@@ -106,30 +110,56 @@ const canSetup = computed(() => {
   return config.collectionName.trim().length > 0
 })
 
+// Watch for specTitle updates to auto-fill collection name
+watch(
+  () => props.initialConfig?.specTitle,
+  (specTitle) => {
+    if (specTitle && !config.collectionName.trim()) {
+      config.collectionName = specTitle
+    }
+  },
+  { immediate: true }
+)
+
 async function handleSetup() {
   if (!canSetup.value) return
 
   try {
-    const source: LiveSpecSource = {
-      id: `live-source-${Date.now()}`,
+    const sourceType = props.initialConfig?.type || "url"
+
+    // Create proper config based on source type
+    const sourceConfig =
+      sourceType === "url"
+        ? {
+            url: props.initialConfig?.url || "",
+            pollInterval:
+              config.syncFrequency === "realtime"
+                ? 5000 // Real-time set to 5s minimum due to validation
+                : config.syncFrequency === "5s"
+                  ? 5000
+                  : config.syncFrequency === "30s"
+                    ? 30000
+                    : 5000, // Default to 5s minimum
+            timeout: 10000,
+            headers: {},
+          }
+        : {
+            filePath: props.initialConfig?.filePath || "",
+            watchEnabled: true,
+          }
+
+    const source = {
       name: config.collectionName,
-      type: props.initialConfig?.type || "url",
-      url: props.initialConfig?.url,
-      filePath: props.initialConfig?.filePath,
-      framework: props.initialConfig?.framework,
-      isActive: true,
-      syncFrequency: config.syncFrequency,
-      preserveCustomizations: config.preserveCustomizations,
-      autoImport: config.autoImport,
-      createdAt: new Date(),
-      lastSyncAt: null,
-      lastError: null,
+      type: sourceType,
+      status: "disconnected" as const,
+      config: sourceConfig,
+      syncStrategy: "replace-all" as const,
     }
 
     // Register the source with the service
-    await liveSpecSourceService.registerSource(source)
+    const registeredSource = await liveSpecSourceService.registerSource(source)
 
-    emit("setup-complete", source)
+    emit("setup-complete", registeredSource)
   } catch (error) {
     console.error("Failed to setup live source:", error)
   }

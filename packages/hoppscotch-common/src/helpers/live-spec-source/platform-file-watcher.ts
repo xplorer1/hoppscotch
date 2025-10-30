@@ -245,11 +245,12 @@ class PlatformFileWatcher implements FileWatcher {
   }
 
   private async createPollingWatcher(
-    _filePath: string,
-    _options: FileWatcherOptions
+    _filePath: string, // eslint-disable-line @typescript-eslint/no-unused-vars
+    _options: FileWatcherOptions // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Promise<any> {
     // Fallback: Simple polling (limited functionality)
     let pollInterval: NodeJS.Timeout | null = null
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _lastContent = ""
 
     const pollForChanges = async () => {

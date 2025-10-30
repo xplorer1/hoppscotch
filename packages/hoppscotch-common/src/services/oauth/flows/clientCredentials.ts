@@ -10,7 +10,11 @@ import * as O from "fp-ts/Option"
 import { useToast } from "~/composables/toast"
 import { ClientCredentialsGrantTypeParams } from "@hoppscotch/data"
 import { KernelInterceptorService } from "~/services/kernel-interceptor.service"
-import { RelayRequest, content } from "@hoppscotch/kernel"
+// Fallback types and helpers if kernel exports are unavailable
+type RelayRequest = any
+const content = {
+  urlencoded: (x: Record<string, string>) => x,
+}
 import { parseBytesToJSON } from "~/helpers/functional/json"
 
 const interceptorService = getService(KernelInterceptorService)

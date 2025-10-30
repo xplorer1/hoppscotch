@@ -189,7 +189,8 @@ describe("ChangeNotificationService", () => {
     })
 
     it("should auto-remove toast after duration", async () => {
-      const id = changeNotificationService.showToast({
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _id = changeNotificationService.showToast({
         type: "info",
         title: "Test Toast",
         message: "Test message",

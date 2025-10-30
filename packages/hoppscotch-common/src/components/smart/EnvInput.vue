@@ -401,8 +401,13 @@ const envVars = computed(() => {
         : []
 
   // Transform request variables to match the env format
+  // Add null checks to prevent map error on undefined requestVariables
+  const safeRequestVariables = Array.isArray(requestVariables)
+    ? requestVariables
+    : []
+
   return [
-    ...requestVariables.map(({ active, key, value }) =>
+    ...safeRequestVariables.map(({ active, key, value }) =>
       active
         ? {
             key,

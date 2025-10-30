@@ -529,6 +529,7 @@ class LiveSyncCollectionsIntegration implements CollectionsStoreIntegration {
 
   private async loadPersistedCollections(): Promise<LiveSyncCollection[]> {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const _sources = await platformIntegrationService.loadLiveSources()
       // Convert sources back to collections (simplified)
       return []

@@ -612,8 +612,8 @@ app.UseCors();
   }
 
   private async recoverGeneric(
-    source: LiveSpecSource,
-    error: string
+    _source: LiveSpecSource, // eslint-disable-line @typescript-eslint/no-unused-vars
+    _error: string // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Promise<{ recovered: boolean; message: string }> {
     return {
       recovered: false,
@@ -638,7 +638,7 @@ app.UseCors();
   }
 
   private getGenericErrorMessage(errorType: string): string {
-    const messages = {
+    const messages: Record<string, string> = {
       connection_failed:
         "Development server not accessible. Check if it's running.",
       cors_error: "CORS not configured. Allow requests from Hoppscotch origin.",
@@ -657,7 +657,7 @@ app.UseCors();
   private async triggerFrameworkSpecificSync(
     sourceId: string,
     event: string,
-    payload: any
+    _payload: any // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Promise<SyncResult> {
     // This would integrate with the sync engine
     // For now, return a mock result

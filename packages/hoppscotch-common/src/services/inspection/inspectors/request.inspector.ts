@@ -8,7 +8,8 @@ import {
 import IconAlertTriangle from "~icons/lucide/alert-triangle"
 import { getI18n } from "~/modules/i18n"
 import { KernelInterceptorService } from "~/services/kernel-interceptor.service"
-import { RelayCapabilities } from "@hoppscotch/kernel"
+// Kernel RelayCapabilities type may not be available in this version
+type RelayCapabilities = Record<string, Set<string>>
 
 type CapabilityRequirement<K extends keyof RelayCapabilities> = {
   type: K
