@@ -11,7 +11,12 @@ import { liveSyncPollingService } from "./live-sync-polling.service"
 import { syncEngineService } from "./sync-engine.service"
 import { changeNotificationService } from "./change-notification.service"
 import { performanceMonitorService } from "./performance-monitor.service"
-import { getLiveSyncCollections } from "~/newstore/collections"
+import {
+  getLiveSyncCollections,
+  restCollectionStore,
+  setCollectionLiveMetadata,
+} from "~/newstore/collections"
+import type { LiveSyncCollection } from "~/types/live-collection-metadata"
 import { PersistenceService } from "./persistence"
 import { getService } from "~/modules/dioc"
 
@@ -43,10 +48,24 @@ export class LiveSyncManagerService {
     isGloballyEnabled: true,
   })
 
+  private initializationPromise: Promise<void> | null = null
+
   constructor() {
-    this.initializeFromExistingCollections()
+    // Delay initialization slightly to ensure collections are loaded
+    this.initializationPromise = this.delayedInitialization()
     this.setupVisibilityHandling()
     this.setupPersistence() // Add persistence setup
+  }
+
+  /**
+   * Delayed initialization to ensure collections and sources are loaded
+   */
+  private async delayedInitialization(): Promise<void> {
+    // Wait a bit for collections to load from store
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log("Starting delayed initialization of live sync sessions...")
+    await this.initializeFromExistingCollections()
+    console.log("Delayed initialization of live sync sessions completed")
   }
 
   /**
@@ -67,8 +86,8 @@ export class LiveSyncManagerService {
         return
       }
 
-      // Get source details
-      const source = await liveSpecSourceService.getSource(sourceId)
+      // Get source details (getSource is synchronous)
+      const source = liveSpecSourceService.getSource(sourceId)
       if (!source) {
         throw new Error(`Source not found: ${sourceId}`)
       }
@@ -92,9 +111,17 @@ export class LiveSyncManagerService {
 
       // Start polling if requested (default: true)
       if (options.startPolling !== false && session.autoSync) {
+        console.log(
+          `Starting polling for source ${sourceId} with interval ${session.pollInterval}ms`
+        )
         await liveSyncPollingService.startPolling(
           sourceId,
           session.pollInterval
+        )
+        console.log(`Polling service started for source ${sourceId}`)
+      } else {
+        console.log(
+          `Polling not started for source ${sourceId}: startPolling=${options.startPolling}, autoSync=${session.autoSync}`
         )
       }
 
@@ -345,22 +372,215 @@ export class LiveSyncManagerService {
   private async initializeFromExistingCollections(): Promise<void> {
     try {
       const liveSyncCollections = getLiveSyncCollections()
+      console.log(`Found ${liveSyncCollections.length} live sync collections`)
+
+      if (liveSyncCollections.length > 0) {
+        // Log collection details for debugging
+        liveSyncCollections.forEach((col) => {
+          console.log(
+            `Collection: ${col.name}, sourceId: ${col.liveMetadata?.sourceId}, autoSync: ${col.liveMetadata?.syncConfig?.autoSync}`
+          )
+        })
+
+        // Wait for sources to load from storage (with timeout)
+        const maxWaitTime = 2000 // 2 seconds max wait
+        const startTime = Date.now()
+        let sources = liveSpecSourceService.getSources()
+
+        // Wait for sources to load, but not indefinitely
+        while (sources.length === 0 && Date.now() - startTime < maxWaitTime) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          sources = liveSpecSourceService.getSources()
+        }
+
+        console.log(
+          `Initializing live sync for ${liveSyncCollections.length} collections, ${sources.length} sources loaded`
+        )
+
+        // Log all loaded source IDs
+        sources.forEach((s) => {
+          console.log(`Loaded source: ${s.id} - ${s.name}`)
+        })
+      } else {
+        console.log(`No live sync collections found via isLiveSync check`)
+        // Fallback: Try to find collections by matching sourceIds
+        // This handles cases where collections have sourceId but isLiveSync isn't set
+        const allCollections = restCollectionStore.value.state
+        const sources = liveSpecSourceService.getSources()
+        console.log(
+          `Checking ${allCollections.length} total collections against ${sources.length} sources`
+        )
+
+        // Debug: Log all collections and their metadata
+        allCollections.forEach((col, idx) => {
+          const hasMetadata = "liveMetadata" in col
+          const sourceId = hasMetadata
+            ? (col as any).liveMetadata?.sourceId
+            : undefined
+          console.log(
+            `Collection ${idx}: "${col.name}" - has liveMetadata: ${hasMetadata}, sourceId: ${sourceId || "none"}`
+          )
+        })
+
+        // Debug: Log all source IDs
+        sources.forEach((s) => {
+          console.log(`Source: "${s.name}" - id: ${s.id}`)
+        })
+
+        // Try to match collections by sourceId
+        for (const source of sources) {
+          const matchingCollectionIndex = allCollections.findIndex(
+            (col): col is LiveSyncCollection =>
+              "liveMetadata" in col &&
+              (col as LiveSyncCollection).liveMetadata?.sourceId === source.id
+          )
+          if (matchingCollectionIndex >= 0) {
+            const matchingCollection = allCollections[
+              matchingCollectionIndex
+            ] as LiveSyncCollection
+            console.log(
+              `Found collection ${matchingCollection.name} with sourceId ${source.id}, but isLiveSync is not set`
+            )
+            // Ensure isLiveSync is set - update through store function
+            const currentMetadata = matchingCollection.liveMetadata
+            const metadataToSet = {
+              isLiveSync: true,
+              sourceId: source.id,
+              ...(currentMetadata
+                ? {
+                    lastSyncTime: currentMetadata.lastSyncTime,
+                    syncStrategy: currentMetadata.syncStrategy || "incremental",
+                    customizations: currentMetadata.customizations,
+                    originalSpecHash: currentMetadata.originalSpecHash,
+                  }
+                : {
+                    syncStrategy: "incremental" as const,
+                  }),
+            }
+            setCollectionLiveMetadata(
+              matchingCollectionIndex,
+              metadataToSet as any
+            )
+            // Re-read from store to get updated collection
+            const updatedCollection = restCollectionStore.value.state[
+              matchingCollectionIndex
+            ] as LiveSyncCollection
+            // Add to liveSyncCollections array for processing
+            liveSyncCollections.push(updatedCollection)
+            console.log(
+              `Added collection ${matchingCollection.name} to live sync collections`
+            )
+          } else {
+            console.log(`No collection found with sourceId: ${source.id}`)
+          }
+        }
+
+        // If still no matches, try matching by name as a last resort
+        // This handles cases where collections were created but liveMetadata wasn't saved
+        if (liveSyncCollections.length === 0) {
+          console.log(
+            `No collections found by sourceId, trying to match by name`
+          )
+          for (const source of sources) {
+            const matchingCollectionIndex = allCollections.findIndex(
+              (col) => col.name === source.name
+            )
+            if (matchingCollectionIndex >= 0) {
+              const matchingCollection = allCollections[matchingCollectionIndex]
+              console.log(
+                `Found collection "${matchingCollection.name}" matching source "${source.name}" by name`
+              )
+
+              // Create liveMetadata for this collection
+              const metadataToSet = {
+                isLiveSync: true,
+                sourceId: source.id,
+                syncStrategy: source.syncStrategy || ("incremental" as const),
+                syncConfig: {
+                  autoSync: true,
+                  syncInterval: (source.config as any).pollInterval || 30000,
+                },
+              }
+              setCollectionLiveMetadata(
+                matchingCollectionIndex,
+                metadataToSet as any
+              )
+
+              // Re-read from store to get updated collection
+              const updatedCollection = restCollectionStore.value.state[
+                matchingCollectionIndex
+              ] as LiveSyncCollection
+              liveSyncCollections.push(updatedCollection)
+              console.log(
+                `Added collection "${matchingCollection.name}" to live sync collections (matched by name)`
+              )
+            }
+          }
+        }
+
+        if (liveSyncCollections.length === 0) {
+          console.log(`No collections found matching loaded sources`)
+          console.log(
+            `Possible issue: Collection's sourceId doesn't match any loaded source IDs, or collection has no sourceId`
+          )
+          return
+        }
+      }
 
       for (const collection of liveSyncCollections) {
         const sourceId = collection.liveMetadata?.sourceId
-        if (sourceId && collection.liveMetadata?.syncConfig?.autoSync) {
+        if (!sourceId) {
+          console.warn(`Collection ${collection.name} has no sourceId`)
+          continue
+        }
+
+        // Verify source exists before starting sync
+        const source = liveSpecSourceService.getSource(sourceId)
+        if (!source) {
+          console.warn(
+            `Source ${sourceId} not found for collection ${collection.name}, skipping`
+          )
+          continue
+        }
+
+        // Check if autoSync is enabled (default to true if not specified)
+        const autoSync = collection.liveMetadata?.syncConfig?.autoSync !== false
+
+        // Get poll interval from collection syncConfig, source config, or default
+        const pollInterval =
+          collection.liveMetadata?.syncConfig?.syncInterval ||
+          (source.config as any).pollInterval ||
+          30000
+
+        if (autoSync) {
           // Check if session already exists (from persistence)
           if (!this.sessions.has(sourceId)) {
             console.log(
-              `Auto-starting live sync for collection: ${collection.name}`
+              `Auto-starting live sync for collection: ${collection.name} (source: ${sourceId}, interval: ${pollInterval}ms)`
             )
-            // Auto-start live sync for collections with autoSync enabled
-            await this.startLiveSync(sourceId, {
-              pollInterval: collection.liveMetadata.syncConfig.syncInterval,
-              autoSync: true,
-              startPolling: true,
-            })
+            try {
+              // Auto-start live sync for collections with autoSync enabled
+              await this.startLiveSync(sourceId, {
+                pollInterval,
+                autoSync: true,
+                startPolling: true,
+              })
+              console.log(
+                `Successfully started live sync for source: ${sourceId}`
+              )
+            } catch (error) {
+              console.error(
+                `Failed to start live sync for source ${sourceId}:`,
+                error
+              )
+            }
+          } else {
+            console.log(`Sync session already exists for source: ${sourceId}`)
           }
+        } else {
+          console.log(
+            `Auto-sync is disabled for collection: ${collection.name}`
+          )
         }
       }
     } catch (error) {

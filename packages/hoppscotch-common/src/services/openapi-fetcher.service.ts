@@ -166,21 +166,62 @@ export class OpenAPIFetcherImpl implements OpenAPIFetcher {
     }
 
     const finalOptions = { ...defaultOptions, ...options }
-    const controller = new AbortController()
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      finalOptions.timeout!
-    )
 
     try {
-      const response = await fetch(url, {
+      // Try HEAD first (more efficient, no body transfer)
+      const headController = new AbortController()
+      const headTimeoutId = setTimeout(
+        () => headController.abort(),
+        finalOptions.timeout!
+      )
+
+      let response = await fetch(url, {
         method: "HEAD",
         headers: finalOptions.headers,
-        signal: controller.signal,
+        signal: headController.signal,
         redirect: finalOptions.followRedirects ? "follow" : "manual",
       })
 
-      clearTimeout(timeoutId)
+      clearTimeout(headTimeoutId)
+
+      // If HEAD returns 404/405, some servers (like ASP.NET Swagger) don't support HEAD
+      // Fall back to GET for validation if this looks like an OpenAPI endpoint
+      const isOpenAPIEndpoint =
+        url.includes("/swagger/") ||
+        url.includes("/openapi") ||
+        url.includes("/api-docs") ||
+        url.includes("/api/") ||
+        url.endsWith(".json") ||
+        url.endsWith(".yaml") ||
+        url.endsWith(".yml")
+
+      if (
+        (response.status === 404 || response.status === 405) &&
+        isOpenAPIEndpoint
+      ) {
+        // Try GET as fallback
+        const getController = new AbortController()
+        const getTimeoutId = setTimeout(
+          () => getController.abort(),
+          finalOptions.timeout!
+        )
+
+        try {
+          response = await fetch(url, {
+            method: "GET",
+            headers: {
+              ...finalOptions.headers,
+              Accept: "application/json, application/x-yaml, text/yaml",
+            },
+            signal: getController.signal,
+            redirect: finalOptions.followRedirects ? "follow" : "manual",
+          })
+          clearTimeout(getTimeoutId)
+        } catch (getError) {
+          clearTimeout(getTimeoutId)
+          throw getError
+        }
+      }
 
       // Check CORS headers
       const corsEnabled = this.checkCORSHeaders(response)
@@ -202,8 +243,6 @@ export class OpenAPIFetcherImpl implements OpenAPIFetcher {
         ),
       }
     } catch (error) {
-      clearTimeout(timeoutId)
-
       return {
         statusCode: 0,
         isReachable: false,
@@ -303,9 +342,23 @@ export class OpenAPIFetcherImpl implements OpenAPIFetcher {
     const suggestions: string[] = []
 
     if (statusCode === 404) {
-      suggestions.push(
-        "Try common OpenAPI endpoints: /openapi.json, /api-docs, /v3/api-docs"
-      )
+      // Framework-specific endpoint suggestions
+      if (
+        url.includes("/swagger/v1/swagger.json") ||
+        url.includes(":5000") ||
+        url.includes(":5001")
+      ) {
+        suggestions.push(
+          "ASP.NET: Verify /swagger/v1/swagger.json endpoint exists"
+        )
+        suggestions.push(
+          "Ensure Program.cs includes: builder.Services.AddSwaggerGen() and app.UseSwagger()"
+        )
+      } else {
+        suggestions.push(
+          "Try common OpenAPI endpoints: /openapi.json, /api-docs, /v3/api-docs, /swagger/v1/swagger.json"
+        )
+      }
     }
 
     if (!corsEnabled) {
@@ -315,7 +368,17 @@ export class OpenAPIFetcherImpl implements OpenAPIFetcher {
     }
 
     // Framework-specific suggestions based on URL
-    if (url.includes(":8000")) {
+    if (url.includes(":5000") || url.includes(":5001")) {
+      suggestions.push(
+        "ASP.NET Core detected - ensure Swagger is enabled in Program.cs"
+      )
+      if (statusCode === 404) {
+        suggestions.push(
+          "Verify that app.UseSwagger() is called and the endpoint is /swagger/v1/swagger.json"
+        )
+        suggestions.push("Check if the app is running with: dotnet run")
+      }
+    } else if (url.includes(":8000")) {
       suggestions.push(
         "FastAPI detected - ensure your app is running with: uvicorn main:app --reload"
       )

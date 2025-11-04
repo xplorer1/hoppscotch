@@ -97,6 +97,10 @@ class LiveSyncCollectionsIntegration implements CollectionsStoreIntegration {
           syncStrategy: source.syncStrategy,
           customizations: {},
           originalSpecHash: this.calculateSpecHash(spec),
+          syncConfig: {
+            autoSync: true,
+            syncInterval: (source.config as any).pollInterval || 30000,
+          },
         },
       }
 

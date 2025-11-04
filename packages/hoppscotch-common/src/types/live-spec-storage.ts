@@ -153,15 +153,36 @@ export class InMemoryLiveSpecStorage implements LiveSpecStorage {
  * LocalStorage-based implementation
  */
 export class LocalStorageLiveSpecStorage implements LiveSpecStorage {
+  private storage: Storage
+
+  constructor(storage?: Storage) {
+    // Use provided storage or fallback to localStorage
+    // This allows using PersistenceService's hoppLocalConfigStorage when available
+    if (storage) {
+      this.storage = storage
+    } else if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-restricted-globals
+      this.storage = window.localStorage
+    } else {
+      // Fallback for non-browser environments
+      this.storage = {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        clear: () => {},
+        length: 0,
+        key: () => null,
+      } as Storage
+    }
+  }
+
   private getStorageKey(key: string): string {
     return `hopp-${key}`
   }
 
   async loadSources(): Promise<LiveSpecSource[]> {
     try {
-      // TODO: Replace with PersistenceService
-      // const data = localStorage.getItem(this.getStorageKey(STORAGE_KEYS.LIVE_SOURCES))
-      const data = null
+      const data = this.storage.getItem(this.getStorageKey(STORAGE_KEYS.LIVE_SOURCES))
       if (!data) return []
       
       const parsed: StoredLiveSourceData = JSON.parse(data)
@@ -174,25 +195,24 @@ export class LocalStorageLiveSpecStorage implements LiveSpecStorage {
         lastSync: source.lastSync ? new Date(source.lastSync) : undefined
       }))
     } catch (error) {
-      console.error('Failed to load live sources from localStorage:', error)
+      console.error('Failed to load live sources from storage:', error)
       return []
     }
   }
 
-  async saveSources(): Promise<void> {
+  async saveSources(sources: LiveSpecSource[]): Promise<void> {
     try {
-      // const data: StoredLiveSourceData = {
-      //   sources,
-      //   lastUpdated: new Date()
-      // }
+      const data: StoredLiveSourceData = {
+        sources,
+        lastUpdated: new Date()
+      }
       
-      // TODO: Replace with PersistenceService
-      // localStorage.setItem(
-      //   this.getStorageKey(STORAGE_KEYS.LIVE_SOURCES),
-      //   JSON.stringify(data)
-      // )
+      this.storage.setItem(
+        this.getStorageKey(STORAGE_KEYS.LIVE_SOURCES),
+        JSON.stringify(data)
+      )
     } catch (error) {
-      console.error('Failed to save live sources to localStorage:', error)
+      console.error('Failed to save live sources to storage:', error)
       throw error
     }
   }

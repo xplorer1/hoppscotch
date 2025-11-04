@@ -53,8 +53,8 @@ export class LiveSyncPollingService {
     }
 
     try {
-      // Get source details
-      const source = await liveSpecSourceService.getSource(sourceId)
+      // Get source details (getSource is synchronous)
+      const source = liveSpecSourceService.getSource(sourceId)
       if (!source) {
         throw new Error(`Source not found: ${sourceId}`)
       }

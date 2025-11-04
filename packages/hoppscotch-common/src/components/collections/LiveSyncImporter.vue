@@ -56,14 +56,78 @@
               </div>
             </div>
 
-            <div class="framework-detection mt-3">
-              <div v-if="detectedFramework" class="detected-framework">
-                <component :is="getFrameworkIconComponent(detectedFramework)" />
-                <span>{{ detectedFramework }} detected</span>
-              </div>
-              <div v-else-if="isDetecting" class="detecting">
-                <IconLoader class="animate-spin" />
-                <span>Detecting framework...</span>
+            <div class="framework-selection mt-3">
+              <div class="form-group">
+                <label class="flex items-center gap-2">
+                  <span>Framework</span>
+                  <span
+                    v-if="
+                      detectedFramework &&
+                      selectedFramework === detectedFramework
+                    "
+                    class="detected-badge"
+                  >
+                    Auto-detected
+                  </span>
+                </label>
+                <div class="framework-select-wrapper">
+                  <select
+                    :value="selectedFramework || ''"
+                    class="form-select framework-select"
+                    @change="handleFrameworkChange"
+                  >
+                    <option value="">Unknown / Other</option>
+                    <option value="fastapi">FastAPI</option>
+                    <option value="express">Express.js</option>
+                    <option value="spring">Spring Boot</option>
+                    <option value="aspnet">ASP.NET Core</option>
+                    <option value="django">Django</option>
+                    <option value="flask">Flask</option>
+                    <option value="rails">Ruby on Rails</option>
+                    <option value="laravel">Laravel</option>
+                  </select>
+                  <component
+                    :is="getFrameworkIconComponent(selectedFramework)"
+                    v-if="selectedFramework"
+                    class="framework-select-icon"
+                  />
+                </div>
+                <div v-if="isDetecting && !detectedFramework" class="detecting">
+                  <IconLoader class="animate-spin" />
+                  <span>Detecting framework...</span>
+                </div>
+                <div
+                  v-if="
+                    detectedFramework &&
+                    selectedFramework &&
+                    selectedFramework !== detectedFramework
+                  "
+                  class="detection-hint"
+                >
+                  <p>
+                    <IconInfo class="hint-icon" />
+                    Auto-detected as:
+                    <strong>{{
+                      getFrameworkDisplayName(detectedFramework)
+                    }}</strong>
+                  </p>
+                  <p class="override-hint">
+                    Will now use:
+                    <strong>{{
+                      getFrameworkDisplayName(selectedFramework)
+                    }}</strong>
+                  </p>
+                </div>
+                <p
+                  v-else-if="detectedFramework && !selectedFramework"
+                  class="detection-hint"
+                >
+                  <IconInfo class="hint-icon" />
+                  Auto-detected as:
+                  <strong>{{
+                    getFrameworkDisplayName(detectedFramework)
+                  }}</strong>
+                </p>
               </div>
             </div>
           </div>
@@ -137,6 +201,15 @@
         <IconCheckCircle v-if="connectionResult.success" />
         <IconXCircle v-else />
         <span>{{ connectionResult.message }}</span>
+        <span
+          v-if="connectionResult.success && connectionResult.framework"
+          class="framework-badge"
+        >
+          <component
+            :is="getFrameworkIconComponent(connectionResult.framework)"
+          />
+          {{ getFrameworkDisplayName(connectionResult.framework) }}
+        </span>
       </div>
 
       <div
@@ -153,7 +226,7 @@
             <IconFolder />
             <span>{{ collection.name }}</span>
             <span class="endpoint-count">
-              {{ collection.requests?.length || 0 }} endpoints
+              {{ countRequestsInCollection(collection) }} endpoints
             </span>
           </div>
         </div>
@@ -171,6 +244,7 @@ import type {
   FrameworkType,
 } from "../../types/live-spec-source"
 import type { HoppCollection } from "@hoppscotch/data"
+import { hoppOpenAPIImporter } from "~/helpers/import-export/import/importers"
 // import { liveSpecSourceService } from "../../services/live-spec-source.service"
 import { detectFramework } from "../../helpers/live-spec-source/framework-detection"
 import LiveSourceSetupWizard from "./LiveSourceSetupWizard.vue"
@@ -217,6 +291,7 @@ const filePath = ref("")
 const urlError = ref("")
 const fileError = ref("")
 const detectedFramework = ref<FrameworkType | null>(null)
+const selectedFramework = ref<FrameworkType | null>(null)
 const isDetecting = ref(false)
 const isTesting = ref(false)
 const showSetupWizard = ref(false)
@@ -225,6 +300,7 @@ const connectionResult = ref<{
   message: string
   preview?: HoppCollection[]
   specTitle?: string
+  framework?: FrameworkType | null
 } | null>(null)
 
 // Computed
@@ -254,7 +330,7 @@ const initialConfig = computed((): Partial<LiveSpecSource> => {
     type: connectionType.value || "url",
     url: connectionType.value === "url" ? serverUrl.value : undefined,
     filePath: connectionType.value === "file" ? filePath.value : undefined,
-    framework: detectedFramework.value || undefined,
+    framework: selectedFramework.value || detectedFramework.value || undefined,
     specTitle: connectionResult.value?.specTitle || undefined,
   }
 })
@@ -263,6 +339,8 @@ const initialConfig = computed((): Partial<LiveSpecSource> => {
 function selectConnectionType(type: "url" | "file") {
   connectionType.value = type
   connectionResult.value = null
+  selectedFramework.value = null
+  detectedFramework.value = null
 
   // Clear errors when switching types
   urlError.value = ""
@@ -316,6 +394,26 @@ function getFrameworkIconComponent(framework: FrameworkType) {
   return icons[framework] || IconCode
 }
 
+function getFrameworkDisplayName(framework: FrameworkType): string {
+  const names: Record<FrameworkType, string> = {
+    fastapi: "FastAPI",
+    express: "Express.js",
+    spring: "Spring Boot",
+    aspnet: "ASP.NET Core",
+    django: "Django",
+    flask: "Flask",
+    rails: "Ruby on Rails",
+    laravel: "Laravel",
+  }
+  return names[framework] || framework
+}
+
+function handleFrameworkChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const value = target.value
+  selectedFramework.value = value ? (value as FrameworkType) : null
+}
+
 async function validateUrl() {
   urlError.value = ""
 
@@ -338,6 +436,10 @@ async function validateUrl() {
     try {
       const framework = await detectFramework(serverUrl.value)
       detectedFramework.value = framework
+      // Auto-select the detected framework if nothing is manually selected
+      if (framework && !selectedFramework.value) {
+        selectedFramework.value = framework
+      }
     } catch (error) {
       // Framework detection failed, but that's okay
       console.warn("Framework detection failed:", error)
@@ -424,6 +526,7 @@ async function testUrlConnection() {
       message: "Connection successful",
       preview,
       specTitle, // Include for the setup wizard
+      framework: selectedFramework.value || detectedFramework.value, // Use selected framework if available, otherwise detected
     }
   } catch (error) {
     throw new Error(
@@ -448,32 +551,23 @@ async function testFileConnection() {
 }
 
 async function generatePreview(spec: any): Promise<HoppCollection[]> {
-  // This is a simplified preview generation
-  // In a real implementation, you'd use the OpenAPI importer
-  const collections: HoppCollection[] = []
+  // Use the actual OpenAPI importer to get accurate preview with proper folder structure
+  try {
+    // Convert spec to JSON string (the importer expects string input)
+    const specString = JSON.stringify(spec)
+    const importResult = await hoppOpenAPIImporter([specString])()
 
-  if (spec.paths) {
-    const endpoints = Object.keys(spec.paths).length
-    collections.push({
-      name: spec.info?.title || "API Collection",
-      folders: [],
-      requests: Array(endpoints)
-        .fill(null)
-        .map((_, i) => ({
-          name: `Endpoint ${i + 1}`,
-          method: "GET",
-          endpoint: Object.keys(spec.paths)[i] || "/",
-          params: [],
-          headers: [],
-          preRequestScript: "",
-          testScript: "",
-          auth: { authType: "none", authActive: true },
-          body: { contentType: null, body: null },
-        })),
-    })
+    if (importResult._tag === "Right") {
+      return importResult.right
+    }
+    // Fallback if import fails - return empty array
+    console.warn("OpenAPI import failed for preview:", importResult.left)
+    return []
+  } catch (error) {
+    console.error("Failed to generate preview:", error)
+    // Fallback: return empty array on error
+    return []
   }
-
-  return collections
 }
 
 function proceedToSetup() {
@@ -498,9 +592,27 @@ function handleSetupCancel() {
   showSetupWizard.value = false
 }
 
+// Helper function to count requests recursively (including folders)
+function countRequestsInCollection(collection: HoppCollection): number {
+  let count = collection.requests?.length || 0
+  // Recursively count requests in folders
+  for (const folder of collection.folders || []) {
+    count += countRequestsInCollection(folder)
+  }
+  return count
+}
+
 // Watch for changes
 watch(serverUrl, validateUrl)
 watch(filePath, validateFile)
+
+// Watch for framework detection and auto-select
+watch(detectedFramework, (newFramework) => {
+  // Only auto-select if user hasn't manually selected something
+  if (newFramework && !selectedFramework.value) {
+    selectedFramework.value = newFramework
+  }
+})
 </script>
 
 <style scoped>
@@ -596,16 +708,44 @@ watch(filePath, validateFile)
   @apply text-sm text-red-600 dark:text-red-400;
 }
 
-.framework-detection {
-  @apply flex items-center gap-2 text-sm;
+.framework-selection {
+  @apply space-y-2;
 }
 
-.detected-framework {
-  @apply flex items-center gap-2 text-green-600 dark:text-green-400;
+.framework-select-wrapper {
+  @apply relative flex items-center;
+}
+
+.framework-select {
+  @apply w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none cursor-pointer;
+}
+
+.framework-select-icon {
+  @apply absolute right-3 w-5 h-5 text-gray-400 pointer-events-none;
+}
+
+.detected-badge {
+  @apply px-2 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded;
 }
 
 .detecting {
-  @apply flex items-center gap-2 text-gray-500;
+  @apply flex items-center gap-2 text-sm text-gray-500;
+}
+
+.detection-hint {
+  @apply space-y-1 text-xs text-gray-600 dark:text-gray-400 mt-1;
+}
+
+.detection-hint p {
+  @apply flex items-center gap-2;
+}
+
+.override-hint {
+  @apply text-blue-600 dark:text-blue-400 font-medium;
+}
+
+.hint-icon {
+  @apply w-3 h-3 flex-shrink-0;
 }
 
 .file-info {
@@ -654,6 +794,14 @@ watch(filePath, validateFile)
 
 .result-message.error {
   @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100;
+}
+
+.framework-badge {
+  @apply flex items-center gap-1 ml-2 px-2 py-1 bg-white dark:bg-gray-700 rounded text-xs font-medium;
+}
+
+.framework-badge svg {
+  @apply w-3 h-3;
 }
 
 .preview {

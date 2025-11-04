@@ -110,9 +110,22 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
   private eventEmitter: EventEmitter = new SimpleEventEmitter()
   private fetcher: OpenAPIFetcher = new OpenAPIFetcherImpl()
 
+  private sourcesLoaded = false
+  private sourcesLoadPromise: Promise<void> | null = null
+
   constructor(storage?: LiveSpecStorage) {
     this.storage = storage || new LocalStorageLiveSpecStorage()
-    this.loadSourcesFromStorage()
+    // Start loading sources immediately
+    this.sourcesLoadPromise = this.loadSourcesFromStorage()
+  }
+
+  /**
+   * Ensure sources are loaded before proceeding
+   */
+  private async ensureSourcesLoaded(): Promise<void> {
+    if (!this.sourcesLoaded && this.sourcesLoadPromise) {
+      await this.sourcesLoadPromise
+    }
   }
 
   /**
@@ -125,8 +138,11 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
       sources.forEach((source) => {
         this.sources.set(source.id, source)
       })
+      this.sourcesLoaded = true
+      console.log(`Loaded ${sources.length} live sync sources from storage`)
     } catch (error) {
       console.error("Failed to load sources from storage:", error)
+      this.sourcesLoaded = true // Mark as loaded even on error to prevent infinite retries
     }
   }
 
@@ -168,8 +184,13 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
       )
     }
 
-    // Detect framework for better UX
-    // const framework = this.detectFramework(source.config, source.type)
+    // Detect framework for better UX if not already provided
+    let framework = source.framework
+    if (!framework && source.type === "url") {
+      const urlConfig = source.config as URLSourceConfig
+      const detection = detectFrameworkFromUrl(urlConfig.url)
+      framework = (detection.frameworks[0]?.name as any) || undefined
+    }
 
     // Create the new source
     const now = new Date()
@@ -182,6 +203,16 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
       syncStrategy: source.syncStrategy,
       lastSync: source.lastSync,
       lastError: source.lastError,
+      framework,
+      url:
+        source.type === "url"
+          ? (source.config as URLSourceConfig).url
+          : undefined,
+      filePath:
+        source.type === "file"
+          ? (source.config as FileSourceConfig).filePath
+          : undefined,
+      specTitle: source.specTitle,
       createdAt: now,
       updatedAt: now,
     }
@@ -228,6 +259,12 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
    * Get all registered sources
    */
   getSources(): LiveSpecSource[] {
+    // Ensure sources are loaded (non-blocking)
+    if (!this.sourcesLoaded && this.sourcesLoadPromise) {
+      this.sourcesLoadPromise.catch(() => {
+        // Error already logged in loadSourcesFromStorage
+      })
+    }
     return Array.from(this.sources.values())
   }
 

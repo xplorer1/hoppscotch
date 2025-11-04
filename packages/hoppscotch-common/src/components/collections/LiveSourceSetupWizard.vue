@@ -154,6 +154,8 @@ async function handleSetup() {
       status: "disconnected" as const,
       config: sourceConfig,
       syncStrategy: "replace-all" as const,
+      framework: props.initialConfig?.framework,
+      specTitle: props.initialConfig?.specTitle,
     }
 
     // Register the source with the service

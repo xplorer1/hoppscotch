@@ -22,6 +22,8 @@ import {
   saveRESTRequestAs,
   editRESTRequest,
   getCollectionIndex,
+  addRESTFolder,
+  restCollectionStore,
 } from "~/newstore/collections"
 import {
   LiveSyncCollection,
@@ -549,6 +551,60 @@ export class SyncEngineService {
     // Apply individual changes (skip URL changes that we'll handle specially)
     const processedUrlChanges = new Set<string>()
 
+    // Collect metadata and parameter changes for old paths that have URL changes
+    // We'll merge these into the URL change handling
+    const metadataChangesForUrlChanges = new Map<string, any[]>()
+    const parameterChangesForUrlChanges = new Map<string, any[]>()
+
+    for (const change of diffResult.changes) {
+      // Check if this change is for an endpoint that has a URL change
+      let matchingUrlChange = null
+      for (const [, urlChange] of urlChanges) {
+        const oldEndpointPath = `${urlChange.oldMethod} ${urlChange.oldPath}`
+        const newEndpointPath = `${urlChange.newMethod} ${urlChange.newPath}`
+
+        // Check if change path matches old or new endpoint path (for metadata changes)
+        if (
+          change.path === oldEndpointPath ||
+          change.path === newEndpointPath
+        ) {
+          matchingUrlChange = { oldEndpointPath, urlChange }
+          break
+        }
+
+        // Check if change path starts with old or new endpoint path (for parameter changes)
+        if (
+          change.path.startsWith(`${oldEndpointPath}/parameters/`) ||
+          change.path.startsWith(`${newEndpointPath}/parameters/`)
+        ) {
+          matchingUrlChange = { oldEndpointPath, urlChange }
+          break
+        }
+      }
+
+      if (matchingUrlChange) {
+        const { oldEndpointPath } = matchingUrlChange
+
+        if (change.type === "endpoint-modified") {
+          // This is a metadata change (summary, description, tags, etc.)
+          if (!metadataChangesForUrlChanges.has(oldEndpointPath)) {
+            metadataChangesForUrlChanges.set(oldEndpointPath, [])
+          }
+          metadataChangesForUrlChanges.get(oldEndpointPath)!.push(change)
+        } else if (
+          change.type === "parameter-added" ||
+          change.type === "parameter-modified" ||
+          change.type === "parameter-removed"
+        ) {
+          // This is a parameter change
+          if (!parameterChangesForUrlChanges.has(oldEndpointPath)) {
+            parameterChangesForUrlChanges.set(oldEndpointPath, [])
+          }
+          parameterChangesForUrlChanges.get(oldEndpointPath)!.push(change)
+        }
+      }
+    }
+
     for (const change of diffResult.changes) {
       try {
         // Skip if this is part of a URL change that we'll handle
@@ -558,21 +614,106 @@ export class SyncEngineService {
         }
 
         if (urlChange) {
-          if (change.type === "endpoint-removed") {
-            // Handle URL change as update
-            console.log(
-              `Detected URL/method change: ${urlChange.oldMethod} ${urlChange.oldPath} → ${urlChange.newMethod} ${urlChange.newPath}`
-            )
-            await this.handleUrlChange(collection, urlChange, newSpec)
-            processedUrlChanges.add(change.path)
-            processedUrlChanges.add(
-              `${urlChange.newMethod} ${urlChange.newPath}`
-            )
+          // Check if this change is part of a URL/method change
+          const oldEndpointPath = `${urlChange.oldMethod} ${urlChange.oldPath}`
+          const newEndpointPath = `${urlChange.newMethod} ${urlChange.newPath}`
+
+          if (
+            change.path === oldEndpointPath &&
+            change.type === "endpoint-removed"
+          ) {
+            // Handle URL change as update (only process once when we encounter the removal)
+            if (!processedUrlChanges.has(oldEndpointPath)) {
+              console.log(
+                `Detected URL/method change: ${urlChange.oldMethod} ${urlChange.oldPath} → ${urlChange.newMethod} ${urlChange.newPath}`
+              )
+
+              // Merge any metadata changes (summary, description, tags, etc.) into the URL change
+              const metadataChanges =
+                metadataChangesForUrlChanges.get(oldEndpointPath) || []
+              if (metadataChanges.length > 0) {
+                console.log(
+                  `Merging ${metadataChanges.length} metadata changes with URL change`
+                )
+                // Merge the metadata changes into the new operation
+                // The urlChange.operation already has the new operation from the addition change,
+                // but we want to ensure all metadata fields (summary, description, tags, operationId) are preserved
+                for (const metadataChange of metadataChanges) {
+                  if (metadataChange.newValue) {
+                    // Merge specific metadata fields explicitly to ensure nothing is lost
+                    const newOp = metadataChange.newValue
+                    if (newOp.summary !== undefined) {
+                      urlChange.operation.summary = newOp.summary
+                    }
+                    if (newOp.description !== undefined) {
+                      urlChange.operation.description = newOp.description
+                    }
+                    if (newOp.operationId !== undefined) {
+                      urlChange.operation.operationId = newOp.operationId
+                    }
+                    if (newOp.tags !== undefined) {
+                      urlChange.operation.tags = newOp.tags
+                    }
+                    // Also merge any other top-level operation fields that might have changed
+                    // but preserve the operation structure (parameters, requestBody, responses come from addition)
+                    Object.keys(newOp).forEach((key) => {
+                      if (
+                        ![
+                          "parameters",
+                          "requestBody",
+                          "responses",
+                          "security",
+                        ].includes(key)
+                      ) {
+                        if (newOp[key] !== undefined) {
+                          urlChange.operation[key] = newOp[key]
+                        }
+                      }
+                    })
+                  }
+                }
+                console.log(
+                  `Merged metadata into URL change operation - summary: ${urlChange.operation.summary || "none"}, tags: ${urlChange.operation.tags?.join(",") || "none"}`
+                )
+              }
+
+              // Note: Parameter changes don't need explicit merging because
+              // urlChange.operation already contains the full new operation from the addition change,
+              // which includes all updated parameters. The createRequestFromSpec will extract them correctly.
+              const paramChanges =
+                parameterChangesForUrlChanges.get(oldEndpointPath) || []
+              if (paramChanges.length > 0) {
+                console.log(
+                  `Note: ${paramChanges.length} parameter changes will be included in URL change (already in new operation)`
+                )
+              }
+
+              await this.handleUrlChange(collection, urlChange, newSpec)
+              processedUrlChanges.add(oldEndpointPath)
+              processedUrlChanges.add(newEndpointPath)
+            }
           }
-          // Skip if already processed as URL change
-          if (processedUrlChanges.has(change.path)) {
+
+          // Skip removal, addition, metadata changes, AND parameter changes if they're part of a URL change
+          if (
+            change.path === oldEndpointPath ||
+            change.path === newEndpointPath
+          ) {
             continue
           }
+
+          // Also skip parameter changes that belong to this URL change
+          if (
+            change.path.startsWith(`${oldEndpointPath}/parameters/`) ||
+            change.path.startsWith(`${newEndpointPath}/parameters/`)
+          ) {
+            continue
+          }
+        }
+
+        // Skip if already processed as URL change
+        if (processedUrlChanges.has(change.path)) {
+          continue
         }
 
         console.log(`Applying change: ${change.type} - ${change.path}`)
@@ -738,6 +879,29 @@ export class SyncEngineService {
       throw new Error(`Invalid endpoint path format: ${change.path}`)
     }
 
+    // Check for duplicates before adding - match by path only (ignore method for duplicate check)
+    // This prevents adding duplicates when method changes weren't detected as URL changes
+    const existingByPath = this.findRequestInCollection(
+      collection,
+      `ANY ${path}`, // Use ANY to match any method
+      path
+    )
+
+    if (existingByPath) {
+      // Found an existing request with the same path - treat as update instead
+      console.log(
+        `Found existing request with path ${path} (method: ${existingByPath.request.method}), treating as update instead of add`
+      )
+      await this.updateEndpointInCollection(collection, {
+        ...change,
+        oldValue: {
+          method: existingByPath.request.method,
+          path: path,
+        },
+      })
+      return
+    }
+
     // Get the collection index
     const collectionIndex = this.findCollectionIndex(
       collection.liveMetadata?.sourceId || ""
@@ -763,16 +927,33 @@ export class SyncEngineService {
     if (tags.length > 0) {
       // Find or create folder for the first tag
       const folderName = tags[0]
-      const folderIndex = collection.folders.findIndex(
+      let folderIndex = collection.folders.findIndex(
         (f) => f.name === folderName
       )
 
       if (folderIndex < 0) {
-        // Need to add folder via proper store method (this is tricky - for now we'll add manually but mark it)
-        console.warn(
-          `Cannot create folder "${folderName}" via store yet - adding endpoint to collection root`
+        // Folder doesn't exist, create it
+        console.log(`Creating new folder "${folderName}" for tag`)
+        addRESTFolder(folderName, basePath)
+
+        // Re-read the collection to get the updated folder index
+        // The folder should be at the end of the folders array
+        const updatedCollection =
+          restCollectionStore.value.state[collectionIndex]
+        folderIndex = updatedCollection.folders.findIndex(
+          (f) => f.name === folderName
         )
-        fullPath = basePath
+
+        if (folderIndex < 0) {
+          // Still not found, add to root as fallback
+          console.warn(
+            `Failed to create folder "${folderName}", adding endpoint to collection root`
+          )
+          fullPath = basePath
+        } else {
+          fullPath = `${basePath}/${folderIndex}`
+          console.log(`Created folder "${folderName}" at index ${folderIndex}`)
+        }
       } else {
         fullPath = `${basePath}/${folderIndex}`
         console.log(`Found folder "${folderName}" at index ${folderIndex}`)
@@ -809,21 +990,43 @@ export class SyncEngineService {
       throw new Error("Collection not found in store")
     }
 
-    // Find the existing request - try to match by old path/method first, then by new path
-    const oldPath = change.oldValue
-      ? this.extractPathFromChange(change.oldValue, change.path)
-      : null
-    const existingRequestInfo = this.findRequestInCollection(
+    // Find the existing request - try multiple strategies:
+    // 1. By new path and method
+    // 2. By old path and method (from oldValue)
+    // 3. By path only (any method) - in case method changed
+    let existingRequestInfo = this.findRequestInCollection(
       collection,
       change.path,
-      oldPath || path
+      path
     )
 
+    if (!existingRequestInfo && change.oldValue) {
+      // Try to match by old path/method
+      const oldMethod = change.oldValue.method || change.path.split(" ", 2)[0]
+      const oldPath =
+        change.oldValue.path ||
+        this.extractPathFromChange(change.oldValue, change.path)
+      const oldEndpointPath = `${oldMethod} ${oldPath}`
+      existingRequestInfo = this.findRequestInCollection(
+        collection,
+        oldEndpointPath,
+        oldPath
+      )
+    }
+
     if (!existingRequestInfo) {
-      // Request not found - might be a new endpoint or URL change
-      // Try to match by operation name or summary
+      // Try matching by path only (any method) - useful when method changes weren't detected
+      existingRequestInfo = this.findRequestInCollection(
+        collection,
+        `ANY ${path}`,
+        path
+      )
+    }
+
+    if (!existingRequestInfo) {
+      // Request not found - treat as new endpoint
       console.log(
-        `Could not find existing request for ${change.path}, trying to match by name`
+        `Could not find existing request for ${change.path}, adding as new endpoint`
       )
       await this.addEndpointToCollection(collection, {
         ...change,
@@ -846,12 +1049,34 @@ export class SyncEngineService {
       spec
     )
     updatedRequest.responses = request.responses || {} // Preserve existing responses
-    updatedRequest.name = request.name || updatedRequest.name // Preserve custom name if set
+
+    // Update name if summary/operationId changed (unless user customized it)
+    // Check if the old name matches what the old spec would have generated
+    const oldOperation = change.oldValue || {}
+    const oldExpectedName =
+      oldOperation.summary || oldOperation.operationId || `${method} ${path}`
+    const wasNameFromSpec = request.name === oldExpectedName
+
+    // Get the new operation's summary/operationId from newValue (which has the full operation)
+    const newOperation = change.newValue || operation
+    const newExpectedName =
+      newOperation.summary || newOperation.operationId || `${method} ${path}`
+
+    if (wasNameFromSpec) {
+      // Name came from spec, update it with new summary/operationId
+      // Use the new name from the operation (might be from merged metadata in URL changes)
+      updatedRequest.name = newExpectedName
+    } else {
+      // Name was customized, preserve it
+      updatedRequest.name = request.name
+    }
 
     // Update the request in place using editRESTRequest
-    const fullPath = folderPath
-      ? `${collectionIndex}/${folderPath}`
-      : collectionIndex.toString()
+    // Preserve folder structure by using the existing folderPath
+    const fullPath =
+      folderPath !== undefined
+        ? `${collectionIndex}/${folderPath}`
+        : collectionIndex.toString()
     editRESTRequest(fullPath, requestIndex, updatedRequest)
 
     console.log(
@@ -875,10 +1100,25 @@ export class SyncEngineService {
     const parts = endpointPath.split(" ", 2)
     const method = parts.length === 2 ? parts[0].toUpperCase() : null
 
-    // Normalize matchPath (remove {baseURL} and extra slashes)
-    const normalizedMatchPath = matchPath
-      .replace(/{{baseURL}}/g, "")
-      .replace(/^\/+/, "/")
+    // Normalize matchPath (remove {baseURL} and extra slashes, exact match preferred)
+    const normalizedMatchPath =
+      matchPath
+        .replace(/{{baseURL}}/g, "")
+        .replace(/^\/+/, "/")
+        .replace(/\/+$/, "") || "/"
+
+    // Helper to normalize and compare paths exactly
+    const normalizePath = (path: string): string => {
+      return (
+        path
+          .replace(/{{baseURL}}/g, "")
+          .replace(/^\/+/, "/")
+          .replace(/\/+$/, "") || "/"
+      )
+    }
+
+    // If method is "ANY", we're doing a path-only match (ignore method)
+    const matchAnyMethod = method === "ANY"
 
     // Search in folders first
     for (
@@ -889,15 +1129,17 @@ export class SyncEngineService {
       const folder = collection.folders[folderIndex]
       for (let i = 0; i < folder.requests.length; i++) {
         const request = folder.requests[i]
-        const matchesMethod = !method || request.method === method
+        const requestPath = normalizePath(request.endpoint)
+        const matchesMethod =
+          matchAnyMethod || !method || request.method === method
+
+        // Exact path match preferred, fallback to contains for parameter variations
         const matchesPath =
-          request.endpoint
-            .replace(/{{baseURL}}/g, "")
-            .replace(/^\/+/, "/")
-            .includes(normalizedMatchPath) ||
-          normalizedMatchPath.includes(
-            request.endpoint.replace(/{{baseURL}}/g, "").replace(/^\/+/, "/")
-          )
+          requestPath === normalizedMatchPath ||
+          requestPath === normalizedMatchPath + "/" ||
+          normalizedMatchPath === requestPath + "/" ||
+          (requestPath.includes(normalizedMatchPath) &&
+            normalizedMatchPath.length > 3) // Only use contains for substantial paths
 
         if (matchesMethod && matchesPath) {
           return { request, folderPath: folderIndex, requestIndex: i }
@@ -908,17 +1150,17 @@ export class SyncEngineService {
     // Search in root requests
     for (let i = 0; i < collection.requests.length; i++) {
       const request = collection.requests[i] as HoppRESTRequest
-      const matchesMethod = !method || request.method === method
+      const requestPath = normalizePath(request.endpoint as string)
+      const matchesMethod =
+        matchAnyMethod || !method || request.method === method
+
+      // Exact path match preferred
       const matchesPath =
-        request.endpoint
-          .replace(/{{baseURL}}/g, "")
-          .replace(/^\/+/, "/")
-          .includes(normalizedMatchPath) ||
-        normalizedMatchPath.includes(
-          (request.endpoint as string)
-            .replace(/{{baseURL}}/g, "")
-            .replace(/^\/+/, "/")
-        )
+        requestPath === normalizedMatchPath ||
+        requestPath === normalizedMatchPath + "/" ||
+        normalizedMatchPath === requestPath + "/" ||
+        (requestPath.includes(normalizedMatchPath) &&
+          normalizedMatchPath.length > 3)
 
       if (matchesMethod && matchesPath) {
         return { request, requestIndex: i }
@@ -987,17 +1229,20 @@ export class SyncEngineService {
         // Check for:
         // 1. URL change: same method, different path
         // 2. Method change: same path, different method
-        // For URL changes, if operationId/summary match, it's definitely a URL change
-        // If they don't match but paths are similar, it might still be a URL change (fallback)
+        // 3. Combined change: different method AND different path (but same operation)
+        // For URL changes, if operationId/summary match, it's definitely a URL/method change
+        // If they don't match but paths are similar, it might still be a change (fallback)
         const isUrlChange =
           removedMethod === addedMethod && removedPath !== addedPath
         const isMethodChange =
           removedPath === addedPath && removedMethod !== addedMethod
+        const isCombinedChange =
+          removedPath !== addedPath && removedMethod !== addedMethod
 
         // Prefer matches with same operationId/summary, but also accept URL/method changes
-        // when they're the only removal+addition pair for that method
+        // when they're the only removal+addition pair for that method or path
         if (
-          (isUrlChange || isMethodChange) &&
+          (isUrlChange || isMethodChange || isCombinedChange) &&
           (sameOperationId ||
             sameSummary ||
             this.isLikelyUrlChange(removal, addition, removals, additions))
@@ -1018,7 +1263,7 @@ export class SyncEngineService {
   }
 
   /**
-   * Check if a removal+addition pair is likely a URL change
+   * Check if a removal+addition pair is likely a URL/method change
    * (fallback when operationId/summary don't match)
    */
   private isLikelyUrlChange(
@@ -1027,11 +1272,11 @@ export class SyncEngineService {
     allRemovals: any[],
     allAdditions: any[]
   ): boolean {
-    const [removedMethod] = removal.path.split(" ", 2)
-    const [addedMethod] = addition.path.split(" ", 2)
+    const [removedMethod, removedPath] = removal.path.split(" ", 2)
+    const [addedMethod, addedPath] = addition.path.split(" ", 2)
 
-    // If same method and this is the only removal+addition for that method, likely a URL change
-    if (removedMethod === addedMethod) {
+    // Case 1: Same method, different path - check if only one removal+addition for this method
+    if (removedMethod === addedMethod && removedPath !== addedPath) {
       const otherRemovalsForMethod = allRemovals.filter(
         (r) => r !== removal && r.path.startsWith(removedMethod)
       )
@@ -1044,6 +1289,33 @@ export class SyncEngineService {
         otherRemovalsForMethod.length === 0 &&
         otherAdditionsForMethod.length === 0
       ) {
+        return true
+      }
+    }
+
+    // Case 2: Same path, different method - check if only one removal+addition for this path
+    if (removedPath === addedPath && removedMethod !== addedMethod) {
+      const otherRemovalsForPath = allRemovals.filter(
+        (r) => r !== removal && r.path.endsWith(removedPath)
+      )
+      const otherAdditionsForPath = allAdditions.filter(
+        (a) => a !== addition && a.path.endsWith(addedPath)
+      )
+
+      // If there's only one removal and one addition for this path, likely a method change
+      if (
+        otherRemovalsForPath.length === 0 &&
+        otherAdditionsForPath.length === 0
+      ) {
+        return true
+      }
+    }
+
+    // Case 3: Both method and path changed - check if this is the only removal+addition
+    if (removedMethod !== addedMethod && removedPath !== addedPath) {
+      // Check if there's only one removal and one addition total
+      // (this is a weaker signal, but if it's the only change, it's likely a combined change)
+      if (allRemovals.length === 1 && allAdditions.length === 1) {
         return true
       }
     }

@@ -354,15 +354,69 @@ export function detectFrameworkFromURL(config: { url: string }) {
   let framework = "unknown"
   let confidence = 0
 
-  // Check URL patterns first (more specific)
-  if (url.includes("/v3/api-docs")) {
+  // Extract port first for context-aware detection
+  let port: string | null = null
+  try {
+    const urlObj = new URL(config.url)
+    port = urlObj.port || (urlObj.protocol === "https:" ? "443" : "80")
+  } catch (e) {
+    // Invalid URL, continue with pattern matching only
+  }
+
+  // Check URL patterns with port context for ambiguous cases
+  if (url.includes("/swagger/v1/swagger.json")) {
+    framework = "aspnet"
+    confidence = 0.9
+    indicators.push("URL matches ASP.NET pattern: /swagger/v1/swagger.json")
+  } else if (url.includes("/swagger/v1/")) {
+    framework = "aspnet"
+    confidence = 0.8
+    indicators.push("URL matches ASP.NET Swagger pattern")
+  } else if (url.includes("/v3/api-docs")) {
     framework = "spring"
-    confidence = 0.8
+    confidence = 0.9
     indicators.push("URL matches spring pattern: /v3/api-docs")
+  } else if (url.includes("/openapi.json")) {
+    // /openapi.json is FastAPI's default endpoint - prioritize FastAPI
+    if (port === "8000" || port === "8001" || port === "8080") {
+      framework = "fastapi"
+      confidence = 0.9
+      indicators.push(
+        `URL matches FastAPI pattern: /openapi.json on port ${port}`
+      )
+    } else if (port === "3000" || port === "8090") {
+      // Express on these ports might use /openapi.json
+      framework = "express"
+      confidence = 0.75
+      indicators.push(
+        "URL matches Express pattern: /openapi.json on port " + port
+      )
+    } else {
+      // Default to FastAPI for /openapi.json (it's FastAPI's default endpoint)
+      framework = "fastapi"
+      confidence = 0.8
+      indicators.push("URL matches FastAPI pattern: /openapi.json")
+    }
   } else if (url.includes("/api-docs")) {
-    framework = "express"
-    confidence = 0.8
-    indicators.push("URL matches express pattern: /api-docs")
+    // /api-docs is ambiguous - check port to determine framework
+    if (port === "8080" || port === "9000") {
+      // Spring Boot commonly uses port 8080/9000
+      framework = "spring"
+      confidence = 0.85
+      indicators.push(
+        "URL matches Spring Boot pattern: /api-docs on port " + port
+      )
+    } else if (port === "3000" || port === "8090") {
+      // Express commonly uses port 3000/8090
+      framework = "express"
+      confidence = 0.85
+      indicators.push("URL matches Express pattern: /api-docs on port " + port)
+    } else {
+      // Default to Express for /api-docs (more common)
+      framework = "express"
+      confidence = 0.7
+      indicators.push("URL matches express pattern: /api-docs")
+    }
   } else if (url.includes("/api-json")) {
     framework = "nestjs"
     confidence = 0.7
@@ -373,55 +427,55 @@ export function detectFrameworkFromURL(config: { url: string }) {
     indicators.push("URL matches nestjs pattern: /api")
   }
 
-  // Port-based heuristics
-  try {
-    const urlObj = new URL(config.url)
-    const port = urlObj.port
-
-    // Use port-based detection for ambiguous cases like /openapi.json
-    if (framework === "unknown" || url.includes("/openapi.json")) {
-      if (port === "3000") {
-        framework = "express"
-        confidence = 0.7
-        indicators.push(`Detected Express from port ${port}`)
-      } else if (port === "8090") {
-        // Port 8090 is commonly used for Node.js/Express backends
-        framework = "express"
-        confidence = 0.7
-        indicators.push(`Detected Express from port ${port}`)
-      } else if (port === "8000") {
-        framework = "fastapi"
-        confidence = 0.7
-        indicators.push("Detected FastAPI from port 8000")
-      } else if (port === "8080") {
-        framework = "spring"
-        confidence = 0.7
-        indicators.push("Detected Spring Boot from port 8080")
-      } else if (url.includes("/openapi.json")) {
-        // For /openapi.json without specific port indicators, check URL patterns more carefully
-        if (url.includes("/api-docs") || url.includes("/swagger")) {
-          framework = "express"
-          confidence = 0.6
-          indicators.push("Detected Express patterns in URL")
-        } else {
-          // Default to Express for generic /openapi.json endpoints
-          framework = "express"
-          confidence = 0.4
-          indicators.push("Assumed Express for /openapi.json endpoint")
-        }
-      }
-    }
-
-    // Add port indicators even when pattern matches
-    if (port === "3000" || port === "8090") {
-      indicators.push("Port commonly used by Express")
-    } else if (port === "8000") {
-      indicators.push("Port 8000 commonly used by FastAPI")
+  // Port-based heuristics for unknown cases (when no URL pattern matched)
+  if (framework === "unknown") {
+    if (port === "5000" || port === "5001") {
+      framework = "aspnet"
+      confidence = 0.8
+      indicators.push(`Detected ASP.NET from port ${port}`)
+    } else if (port === "3000") {
+      framework = "express"
+      confidence = 0.7
+      indicators.push(`Detected Express from port ${port}`)
+    } else if (port === "8090") {
+      // Port 8090 is commonly used for Node.js/Express backends
+      framework = "express"
+      confidence = 0.7
+      indicators.push(`Detected Express from port ${port}`)
+    } else if (port === "8000" || port === "8001") {
+      framework = "fastapi"
+      confidence = 0.7
+      indicators.push(`Detected FastAPI from port ${port}`)
     } else if (port === "8080") {
-      indicators.push("Port 8080 commonly used by Spring Boot")
+      framework = "spring"
+      confidence = 0.7
+      indicators.push("Detected Spring Boot from port 8080")
     }
-  } catch (e) {
-    // Invalid URL, ignore port detection
+  }
+
+  // Add port indicators even when pattern matches (if not already added)
+  if (port) {
+    if (
+      (port === "5000" || port === "5001") &&
+      !indicators.some((i) => i.includes("ASP.NET"))
+    ) {
+      indicators.push("Port commonly used by ASP.NET Core")
+    } else if (
+      (port === "3000" || port === "8090") &&
+      !indicators.some((i) => i.includes("Express"))
+    ) {
+      indicators.push("Port commonly used by Express")
+    } else if (
+      (port === "8000" || port === "8001") &&
+      !indicators.some((i) => i.includes("FastAPI"))
+    ) {
+      indicators.push(`Port ${port} commonly used by FastAPI`)
+    } else if (
+      (port === "8080" || port === "9000") &&
+      !indicators.some((i) => i.includes("Spring"))
+    ) {
+      indicators.push(`Port ${port} commonly used by Spring Boot`)
+    }
   }
 
   return {

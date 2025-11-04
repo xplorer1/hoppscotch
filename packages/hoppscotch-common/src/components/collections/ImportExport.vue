@@ -750,8 +750,18 @@ const LiveSyncImporterConfig: ImporterOrExporter = {
             await handleImportToStore(collections)
             setCurrentImportSummary(collections)
 
+            // Count all requests including those in folders (recursive)
+            const countRequestsInCollection = (collection: any): number => {
+              let count = collection.requests?.length || 0
+              // Recursively count requests in folders
+              for (const folder of collection.folders || []) {
+                count += countRequestsInCollection(folder)
+              }
+              return count
+            }
+
             const totalRequests = collections.reduce(
-              (sum, col) => sum + (col.requests?.length || 0),
+              (sum, col) => sum + countRequestsInCollection(col),
               0
             )
             toast.success(

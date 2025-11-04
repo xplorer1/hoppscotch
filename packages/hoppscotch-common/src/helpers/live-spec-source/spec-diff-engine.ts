@@ -199,6 +199,11 @@ export class SpecDiffEngine {
         const oldMethod = oldMethods[method]
         const newMethod = newMethods[method]
 
+        // Compare operation-level metadata (summary, description, operationId, tags)
+        changes.push(
+          ...this.compareOperationMetadata(endpointId, oldMethod, newMethod)
+        )
+
         // Compare parameters
         changes.push(
           ...this.compareParameters(
@@ -256,6 +261,73 @@ export class SpecDiffEngine {
           affectedEndpoints: [endpointId],
         })
       }
+    }
+
+    return changes
+  }
+
+  /**
+   * Compare operation-level metadata (summary, description, operationId, tags)
+   */
+  private compareOperationMetadata(
+    endpointId: string,
+    oldMethod: any,
+    newMethod: any
+  ): SpecChange[] {
+    const changes: SpecChange[] = []
+
+    // Compare summary
+    if (oldMethod.summary !== newMethod.summary) {
+      changes.push({
+        type: "endpoint-modified",
+        severity: "informational",
+        path: endpointId, // Use actual endpoint path, not endpointId/summary
+        description: `Summary changed for ${endpointId}`,
+        oldValue: oldMethod, // Pass full old operation so sync engine can update properly
+        newValue: newMethod, // Pass full new operation so sync engine can update properly
+        affectedEndpoints: [endpointId],
+      })
+    }
+
+    // Compare description
+    if (oldMethod.description !== newMethod.description) {
+      changes.push({
+        type: "endpoint-modified",
+        severity: "informational",
+        path: endpointId, // Use actual endpoint path
+        description: `Description changed for ${endpointId}`,
+        oldValue: oldMethod,
+        newValue: newMethod,
+        affectedEndpoints: [endpointId],
+      })
+    }
+
+    // Compare operationId
+    if (oldMethod.operationId !== newMethod.operationId) {
+      changes.push({
+        type: "endpoint-modified",
+        severity: "non-breaking",
+        path: endpointId, // Use actual endpoint path
+        description: `Operation ID changed for ${endpointId}`,
+        oldValue: oldMethod,
+        newValue: newMethod,
+        affectedEndpoints: [endpointId],
+      })
+    }
+
+    // Compare tags
+    const oldTags = (oldMethod.tags || []).sort().join(",")
+    const newTags = (newMethod.tags || []).sort().join(",")
+    if (oldTags !== newTags) {
+      changes.push({
+        type: "endpoint-modified",
+        severity: "informational",
+        path: endpointId, // Use actual endpoint path
+        description: `Tags changed for ${endpointId}`,
+        oldValue: oldMethod,
+        newValue: newMethod,
+        affectedEndpoints: [endpointId],
+      })
     }
 
     return changes
