@@ -48,11 +48,9 @@ export class LiveSyncManagerService {
     isGloballyEnabled: true,
   })
 
-  private initializationPromise: Promise<void> | null = null
-
   constructor() {
     // Delay initialization slightly to ensure collections are loaded
-    this.initializationPromise = this.delayedInitialization()
+    this.delayedInitialization()
     this.setupVisibilityHandling()
     this.setupPersistence() // Add persistence setup
   }
@@ -63,9 +61,7 @@ export class LiveSyncManagerService {
   private async delayedInitialization(): Promise<void> {
     // Wait a bit for collections to load from store
     await new Promise((resolve) => setTimeout(resolve, 500))
-    console.log("Starting delayed initialization of live sync sessions...")
     await this.initializeFromExistingCollections()
-    console.log("Delayed initialization of live sync sessions completed")
   }
 
   /**
@@ -111,17 +107,9 @@ export class LiveSyncManagerService {
 
       // Start polling if requested (default: true)
       if (options.startPolling !== false && session.autoSync) {
-        console.log(
-          `Starting polling for source ${sourceId} with interval ${session.pollInterval}ms`
-        )
         await liveSyncPollingService.startPolling(
           sourceId,
           session.pollInterval
-        )
-        console.log(`Polling service started for source ${sourceId}`)
-      } else {
-        console.log(
-          `Polling not started for source ${sourceId}: startPolling=${options.startPolling}, autoSync=${session.autoSync}`
         )
       }
 
@@ -135,8 +123,6 @@ export class LiveSyncManagerService {
         message: `Now monitoring ${source.name} for changes`,
         duration: 3000,
       })
-
-      console.log(`Started live sync for source: ${sourceId}`)
     } catch (error) {
       console.error(`Failed to start live sync for ${sourceId}:`, error)
       throw error
@@ -174,8 +160,6 @@ export class LiveSyncManagerService {
         message: `Stopped monitoring ${session.source.name}`,
         duration: 3000,
       })
-
-      console.log(`Stopped live sync for source: ${sourceId}`)
     } catch (error) {
       console.error(`Error stopping live sync for ${sourceId}:`, error)
     }
@@ -372,16 +356,7 @@ export class LiveSyncManagerService {
   private async initializeFromExistingCollections(): Promise<void> {
     try {
       const liveSyncCollections = getLiveSyncCollections()
-      console.log(`Found ${liveSyncCollections.length} live sync collections`)
-
       if (liveSyncCollections.length > 0) {
-        // Log collection details for debugging
-        liveSyncCollections.forEach((col) => {
-          console.log(
-            `Collection: ${col.name}, sourceId: ${col.liveMetadata?.sourceId}, autoSync: ${col.liveMetadata?.syncConfig?.autoSync}`
-          )
-        })
-
         // Wait for sources to load from storage (with timeout)
         const maxWaitTime = 2000 // 2 seconds max wait
         const startTime = Date.now()
@@ -392,40 +367,11 @@ export class LiveSyncManagerService {
           await new Promise((resolve) => setTimeout(resolve, 50))
           sources = liveSpecSourceService.getSources()
         }
-
-        console.log(
-          `Initializing live sync for ${liveSyncCollections.length} collections, ${sources.length} sources loaded`
-        )
-
-        // Log all loaded source IDs
-        sources.forEach((s) => {
-          console.log(`Loaded source: ${s.id} - ${s.name}`)
-        })
       } else {
-        console.log(`No live sync collections found via isLiveSync check`)
         // Fallback: Try to find collections by matching sourceIds
         // This handles cases where collections have sourceId but isLiveSync isn't set
         const allCollections = restCollectionStore.value.state
         const sources = liveSpecSourceService.getSources()
-        console.log(
-          `Checking ${allCollections.length} total collections against ${sources.length} sources`
-        )
-
-        // Debug: Log all collections and their metadata
-        allCollections.forEach((col, idx) => {
-          const hasMetadata = "liveMetadata" in col
-          const sourceId = hasMetadata
-            ? (col as any).liveMetadata?.sourceId
-            : undefined
-          console.log(
-            `Collection ${idx}: "${col.name}" - has liveMetadata: ${hasMetadata}, sourceId: ${sourceId || "none"}`
-          )
-        })
-
-        // Debug: Log all source IDs
-        sources.forEach((s) => {
-          console.log(`Source: "${s.name}" - id: ${s.id}`)
-        })
 
         // Try to match collections by sourceId
         for (const source of sources) {
@@ -438,9 +384,6 @@ export class LiveSyncManagerService {
             const matchingCollection = allCollections[
               matchingCollectionIndex
             ] as LiveSyncCollection
-            console.log(
-              `Found collection ${matchingCollection.name} with sourceId ${source.id}, but isLiveSync is not set`
-            )
             // Ensure isLiveSync is set - update through store function
             const currentMetadata = matchingCollection.liveMetadata
             const metadataToSet = {
@@ -467,30 +410,17 @@ export class LiveSyncManagerService {
             ] as LiveSyncCollection
             // Add to liveSyncCollections array for processing
             liveSyncCollections.push(updatedCollection)
-            console.log(
-              `Added collection ${matchingCollection.name} to live sync collections`
-            )
-          } else {
-            console.log(`No collection found with sourceId: ${source.id}`)
           }
         }
 
         // If still no matches, try matching by name as a last resort
         // This handles cases where collections were created but liveMetadata wasn't saved
         if (liveSyncCollections.length === 0) {
-          console.log(
-            `No collections found by sourceId, trying to match by name`
-          )
           for (const source of sources) {
             const matchingCollectionIndex = allCollections.findIndex(
               (col) => col.name === source.name
             )
             if (matchingCollectionIndex >= 0) {
-              const matchingCollection = allCollections[matchingCollectionIndex]
-              console.log(
-                `Found collection "${matchingCollection.name}" matching source "${source.name}" by name`
-              )
-
               // Create liveMetadata for this collection
               const metadataToSet = {
                 isLiveSync: true,
@@ -511,18 +441,11 @@ export class LiveSyncManagerService {
                 matchingCollectionIndex
               ] as LiveSyncCollection
               liveSyncCollections.push(updatedCollection)
-              console.log(
-                `Added collection "${matchingCollection.name}" to live sync collections (matched by name)`
-              )
             }
           }
         }
 
         if (liveSyncCollections.length === 0) {
-          console.log(`No collections found matching loaded sources`)
-          console.log(
-            `Possible issue: Collection's sourceId doesn't match any loaded source IDs, or collection has no sourceId`
-          )
           return
         }
       }
@@ -555,9 +478,6 @@ export class LiveSyncManagerService {
         if (autoSync) {
           // Check if session already exists (from persistence)
           if (!this.sessions.has(sourceId)) {
-            console.log(
-              `Auto-starting live sync for collection: ${collection.name} (source: ${sourceId}, interval: ${pollInterval}ms)`
-            )
             try {
               // Auto-start live sync for collections with autoSync enabled
               await this.startLiveSync(sourceId, {
@@ -565,22 +485,13 @@ export class LiveSyncManagerService {
                 autoSync: true,
                 startPolling: true,
               })
-              console.log(
-                `Successfully started live sync for source: ${sourceId}`
-              )
             } catch (error) {
               console.error(
                 `Failed to start live sync for source ${sourceId}:`,
                 error
               )
             }
-          } else {
-            console.log(`Sync session already exists for source: ${sourceId}`)
           }
-        } else {
-          console.log(
-            `Auto-sync is disabled for collection: ${collection.name}`
-          )
         }
       }
     } catch (error) {
@@ -598,10 +509,8 @@ export class LiveSyncManagerService {
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
-          console.log("Tab hidden, pausing live sync polling")
           this.pauseAllPolling()
         } else {
-          console.log("Tab visible, resuming live sync polling")
           this.resumeAllPolling()
         }
       })
@@ -675,7 +584,6 @@ export class LiveSyncManagerService {
       )
       if (persistedData) {
         const sessions = JSON.parse(persistedData)
-        console.log(`Loading ${sessions.length} persisted live sync sessions`)
 
         // Restore sessions
         for (const sessionData of sessions) {

@@ -95,8 +95,6 @@ export class LiveSyncPollingService {
 
       this.pollingStates.set(sourceId, pollingState)
       this.updateReactiveState()
-
-      console.log(`Started polling source ${sourceId} every ${pollInterval}ms`)
     } catch (error) {
       console.error(`Failed to start polling for ${sourceId}:`, error)
       throw error
@@ -118,11 +116,9 @@ export class LiveSyncPollingService {
     if (preserveState) {
       // Keep the state but mark as stopped
       pollingState.isPolling = false
-      console.log(`Paused polling source: ${sourceId} (preserving state)`)
     } else {
       // Delete state completely
       this.pollingStates.delete(sourceId)
-      console.log(`Stopped polling source: ${sourceId}`)
     }
 
     this.updateReactiveState()
@@ -151,8 +147,6 @@ export class LiveSyncPollingService {
     pollingState.interval = interval
     pollingState.isPolling = true
     this.updateReactiveState()
-
-    console.log(`Resumed polling source ${sourceId}`)
   }
 
   /**
@@ -199,8 +193,6 @@ export class LiveSyncPollingService {
     // Update state
     pollingState.interval = newIntervalHandle
     pollingState.pollInterval = newInterval
-
-    console.log(`Updated poll interval for ${sourceId} to ${newInterval}ms`)
   }
 
   /**
@@ -209,11 +201,6 @@ export class LiveSyncPollingService {
   private async pollSource(sourceId: string): Promise<void> {
     const pollingState = this.pollingStates.get(sourceId)
     if (!pollingState) return
-
-    // Log every polling attempt
-    console.log(
-      `Polling source ${sourceId} at ${new Date().toLocaleTimeString()}`
-    )
 
     try {
       // Get source details
@@ -228,7 +215,6 @@ export class LiveSyncPollingService {
       performanceMonitorService.startSyncMeasurement(sourceId)
 
       // Fetch current spec
-      console.log(`Fetching spec for source: ${sourceId}`)
       const currentSpec = await this.fetchSourceSpec(source)
       if (!currentSpec) {
         console.warn(`Failed to fetch spec during polling: ${sourceId}`)
@@ -239,35 +225,12 @@ export class LiveSyncPollingService {
       // Generate hash for comparison
       const currentSpecHash = this.generateSpecHash(currentSpec)
 
-      // Log spec info for debugging
-      const endpointCount = currentSpec?.paths
-        ? Object.keys(currentSpec.paths).length
-        : 0
-      const lastHash = pollingState.lastSpecHash
-        ? pollingState.lastSpecHash.substring(0, 8)
-        : "null"
-      const currHash = currentSpecHash.substring(0, 8)
-      console.log(
-        `Spec info: ${endpointCount} paths, lastHash=${lastHash}..., currHash=${currHash}...`
-      )
-
       // Check if spec has changed
-      console.log(
-        `Hash check: lastSpecHash=${pollingState.lastSpecHash?.substring(0, 8) || "undefined"}, currentHash=${currentSpecHash.substring(0, 8)}, hashesMatch=${pollingState.lastSpecHash === currentSpecHash}`
-      )
-      console.log(
-        `Polling state: ${JSON.stringify({ hasLastSpecHash: !!pollingState.lastSpecHash, isPolling: pollingState.isPolling })}`
-      )
 
       if (
         pollingState.lastSpecHash &&
         pollingState.lastSpecHash !== currentSpecHash
       ) {
-        console.log(`Changes detected in source: ${sourceId}`)
-        console.log(
-          `Hash comparison: old=${pollingState.lastSpecHash}, new=${currentSpecHash}`
-        )
-
         // Get previous spec for diff (if available)
         const previousSpec = await this.getPreviousSpec(sourceId)
         if (previousSpec) {
@@ -276,14 +239,9 @@ export class LiveSyncPollingService {
             previousSpec,
             currentSpec
           )
-          console.log(`Diff result:`, diffResult)
 
           // Only trigger sync if there are actual changes
           if (diffResult.hasChanges) {
-            console.log(
-              `Diff detected: ${diffResult.summary.added} added, ${diffResult.summary.modified} modified, ${diffResult.summary.removed} removed`
-            )
-
             // Convert to UI-friendly format
             const specDiff: SpecDiff = {
               hasChanges: true,
@@ -302,39 +260,27 @@ export class LiveSyncPollingService {
             }
 
             // Trigger sync
-            console.log(`Triggering sync for source: ${sourceId}`)
             try {
-              const syncResult = await syncEngineService.triggerSync(sourceId)
-              console.log(`Sync completed for source: ${sourceId}`, syncResult)
+              await syncEngineService.triggerSync(sourceId)
               // Update hash AFTER successful sync
               pollingState.lastSpecHash = currentSpecHash
             } catch (error) {
               console.error(`Sync failed for source: ${sourceId}`, error)
             }
           } else {
-            console.log(
-              `Hash changed but no diff detected - this may indicate cached spec. Updating hash anyway.`
-            )
             // Update the hash even if no diff, so we don't keep checking the same thing
             pollingState.lastSpecHash = currentSpecHash
           }
         } else {
           // No previous spec available, just trigger sync
-          console.log(
-            `Triggering sync for source: ${sourceId} (no previous spec)`
-          )
           try {
-            const syncResult = await syncEngineService.triggerSync(sourceId)
-            console.log(`Sync completed for source: ${sourceId}`, syncResult)
+            await syncEngineService.triggerSync(sourceId)
             // Update hash AFTER successful sync
             pollingState.lastSpecHash = currentSpecHash
           } catch (error) {
             console.error(`Sync failed for source: ${sourceId}`, error)
           }
         }
-      } else {
-        // Log when no changes are detected
-        console.log(`No changes detected for source: ${sourceId}`)
       }
 
       // Update polling state (don't update lastSpecHash here - it's updated in sync handlers)
@@ -407,7 +353,6 @@ export class LiveSyncPollingService {
     // Get from sync engine's stored specs
     try {
       const stored = syncEngineService.getStoredSpec(sourceId)
-      console.log(`Getting previous spec: ${stored ? "found" : "not found"}`)
       return stored || null
     } catch {
       return null

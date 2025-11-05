@@ -240,12 +240,6 @@ export class SyncEngineService {
       if (this.storedSpecs.size > this.MAX_STORED_SPECS) {
         this.cleanupOldSpecs()
       }
-
-      console.log(`Stored spec for ${sourceId}:`, {
-        hash: hash.substring(0, 10) + "...",
-        timestamp: storedSpec.timestamp,
-        endpoints: Object.keys(spec?.paths || {}).length,
-      })
     } catch (error) {
       console.error(`Failed to store spec for ${sourceId}:`, error)
     }
@@ -257,15 +251,8 @@ export class SyncEngineService {
   getStoredSpec(sourceId: string): any | null {
     const stored = this.storedSpecs.get(sourceId)
     if (!stored) {
-      console.log(`No stored spec found for ${sourceId}`)
       return null
     }
-
-    console.log(`Retrieved stored spec for ${sourceId}:`, {
-      hash: stored.hash.substring(0, 10) + "...",
-      age: Date.now() - stored.timestamp.getTime(),
-      endpoints: Object.keys(stored.spec?.paths || {}).length,
-    })
 
     return stored.spec
   }
@@ -298,7 +285,6 @@ export class SyncEngineService {
     for (let i = 0; i < toRemove; i++) {
       const [sourceId] = entries[i]
       this.storedSpecs.delete(sourceId)
-      console.log(`Cleaned up old spec for ${sourceId}`)
     }
   }
 
@@ -373,16 +359,10 @@ export class SyncEngineService {
     const sourceId = collection.liveMetadata?.sourceId || ""
 
     try {
-      console.log(`Syncing collection for source: ${sourceId}`)
-
       // Get the old spec from storage
       const oldSpec = this.getStoredSpec(sourceId)
 
       if (!oldSpec) {
-        console.log(
-          `No previous spec found for ${sourceId}, treating as initial sync`
-        )
-
         // First sync - no comparison needed, just apply the spec
         const conflicts = await this.applyChangesToCollection(collection, {
           hasChanges: true,
@@ -435,26 +415,15 @@ export class SyncEngineService {
       }
 
       // Compare specs using diff engine
-      console.log(`Comparing specs for ${sourceId}`)
       const diffResult = await this.diffEngine.compareSpecs(oldSpec, newSpec)
 
-      console.log(`Diff result for ${sourceId}:`, {
-        hasChanges: diffResult.hasChanges,
-        added: diffResult.summary.added,
-        modified: diffResult.summary.modified,
-        removed: diffResult.summary.removed,
-      })
-
       if (!diffResult.hasChanges) {
-        console.log(`No changes detected for ${sourceId}`)
         return {
           success: true,
           collectionId: sourceId,
           changes: diffResult,
         }
       }
-
-      console.log(`Applying changes to collection for ${sourceId}`)
 
       // Apply changes to collection
       const conflicts = await this.applyChangesToCollection(
@@ -476,8 +445,6 @@ export class SyncEngineService {
           conflicts
         )
       }
-
-      console.log(`Successfully synced collection for ${sourceId}`)
 
       return {
         success: true,
@@ -519,13 +486,8 @@ export class SyncEngineService {
     const conflicts: SyncConflict[] = []
     const sourceId = collection.liveMetadata?.sourceId || ""
 
-    console.log(
-      `Applying ${diffResult.changes.length} changes to collection for ${sourceId}`
-    )
-
     // If this is an initial sync with no specific changes, rebuild the entire collection
     if (diffResult.changes.length === 0 && diffResult.hasChanges) {
-      console.log(`Initial sync - rebuilding collection for ${sourceId}`)
       return await this.rebuildCollectionFromSpec(collection, sourceId)
     }
 
@@ -624,17 +586,10 @@ export class SyncEngineService {
           ) {
             // Handle URL change as update (only process once when we encounter the removal)
             if (!processedUrlChanges.has(oldEndpointPath)) {
-              console.log(
-                `Detected URL/method change: ${urlChange.oldMethod} ${urlChange.oldPath} → ${urlChange.newMethod} ${urlChange.newPath}`
-              )
-
               // Merge any metadata changes (summary, description, tags, etc.) into the URL change
               const metadataChanges =
                 metadataChangesForUrlChanges.get(oldEndpointPath) || []
               if (metadataChanges.length > 0) {
-                console.log(
-                  `Merging ${metadataChanges.length} metadata changes with URL change`
-                )
                 // Merge the metadata changes into the new operation
                 // The urlChange.operation already has the new operation from the addition change,
                 // but we want to ensure all metadata fields (summary, description, tags, operationId) are preserved
@@ -672,9 +627,6 @@ export class SyncEngineService {
                     })
                   }
                 }
-                console.log(
-                  `Merged metadata into URL change operation - summary: ${urlChange.operation.summary || "none"}, tags: ${urlChange.operation.tags?.join(",") || "none"}`
-                )
               }
 
               // Note: Parameter changes don't need explicit merging because
@@ -683,9 +635,6 @@ export class SyncEngineService {
               const paramChanges =
                 parameterChangesForUrlChanges.get(oldEndpointPath) || []
               if (paramChanges.length > 0) {
-                console.log(
-                  `Note: ${paramChanges.length} parameter changes will be included in URL change (already in new operation)`
-                )
               }
 
               await this.handleUrlChange(collection, urlChange, newSpec)
@@ -716,8 +665,6 @@ export class SyncEngineService {
           continue
         }
 
-        console.log(`Applying change: ${change.type} - ${change.path}`)
-
         switch (change.type) {
           case "endpoint-added":
             await this.addEndpointToCollection(collection, {
@@ -740,7 +687,6 @@ export class SyncEngineService {
             await this.updateEndpointParameters(collection, change)
             break
           default:
-            console.log(`Unhandled change type: ${change.type}`)
         }
       } catch (error) {
         console.error(
@@ -758,9 +704,6 @@ export class SyncEngineService {
       }
     }
 
-    console.log(
-      `Applied changes to collection for ${sourceId}, conflicts: ${conflicts.length}`
-    )
     return conflicts
   }
 
@@ -780,7 +723,6 @@ export class SyncEngineService {
         throw new Error(`Source not found: ${sourceId}`)
       }
 
-      console.log(`Fetching spec for rebuild: ${sourceId}`)
       const fetchResult = await liveSpecSourceService.fetchSpec(sourceId)
       if (!fetchResult.success || !fetchResult.spec) {
         throw new Error(
@@ -792,15 +734,11 @@ export class SyncEngineService {
       const paths = spec.paths || {}
       const endpointCount = Object.keys(paths).length
 
-      console.log(`Rebuilding collection with ${endpointCount} endpoints`)
-
       if (endpointCount === 0) {
-        console.log(`No endpoints found in spec for ${sourceId}`)
         return conflicts
       }
 
       // Use OpenAPI importer to rebuild collection with proper folder structure
-      console.log(`Using OpenAPI importer to rebuild collection with tags...`)
       const { hoppOpenAPIImporter } = await import(
         "~/helpers/import-export/import/importers"
       )
@@ -811,9 +749,6 @@ export class SyncEngineService {
 
       if (importResult._tag === "Right" && importResult.right.length > 0) {
         const importedCollection = importResult.right[0]
-        console.log(
-          `Imported collection with ${importedCollection.folders.length} folders and ${importedCollection.requests.length} untagged requests`
-        )
 
         // Replace the existing collection with the newly imported one
         const collectionIndex = this.findCollectionIndex(
@@ -830,10 +765,6 @@ export class SyncEngineService {
 
           // Preserve live metadata
           collection.name = importedCollection.name || collection.name
-
-          console.log(
-            `Collection rebuild completed with proper folder structure`
-          )
         }
       } else {
         console.error(`Failed to import spec for ${sourceId}`)
@@ -870,8 +801,6 @@ export class SyncEngineService {
     collection: LiveSyncCollection,
     change: any
   ): Promise<void> {
-    console.log(`Adding endpoint: ${change.path}`)
-
     // Parse the endpoint path (format: "GET /users/{id}")
     const [method, path] = change.path.split(" ", 2)
 
@@ -889,9 +818,6 @@ export class SyncEngineService {
 
     if (existingByPath) {
       // Found an existing request with the same path - treat as update instead
-      console.log(
-        `Found existing request with path ${path} (method: ${existingByPath.request.method}), treating as update instead of add`
-      )
       await this.updateEndpointInCollection(collection, {
         ...change,
         oldValue: {
@@ -933,7 +859,6 @@ export class SyncEngineService {
 
       if (folderIndex < 0) {
         // Folder doesn't exist, create it
-        console.log(`Creating new folder "${folderName}" for tag`)
         addRESTFolder(folderName, basePath)
 
         // Re-read the collection to get the updated folder index
@@ -952,18 +877,13 @@ export class SyncEngineService {
           fullPath = basePath
         } else {
           fullPath = `${basePath}/${folderIndex}`
-          console.log(`Created folder "${folderName}" at index ${folderIndex}`)
         }
       } else {
         fullPath = `${basePath}/${folderIndex}`
-        console.log(`Found folder "${folderName}" at index ${folderIndex}`)
       }
     }
 
-    const insertionIndex = saveRESTRequestAs(fullPath, request)
-    console.log(
-      `Added endpoint ${change.path} at path ${fullPath}, index ${insertionIndex}`
-    )
+    saveRESTRequestAs(fullPath, request)
   }
 
   /**
@@ -973,8 +893,6 @@ export class SyncEngineService {
     collection: LiveSyncCollection,
     change: any
   ): Promise<void> {
-    console.log(`Updating endpoint: ${change.path}`)
-
     // Parse the endpoint path (format: "GET /users/{id}")
     const [method, path] = change.path.split(" ", 2)
 
@@ -1025,9 +943,6 @@ export class SyncEngineService {
 
     if (!existingRequestInfo) {
       // Request not found - treat as new endpoint
-      console.log(
-        `Could not find existing request for ${change.path}, adding as new endpoint`
-      )
       await this.addEndpointToCollection(collection, {
         ...change,
         spec: change.spec || {},
@@ -1078,10 +993,6 @@ export class SyncEngineService {
         ? `${collectionIndex}/${folderPath}`
         : collectionIndex.toString()
     editRESTRequest(fullPath, requestIndex, updatedRequest)
-
-    console.log(
-      `Updated endpoint ${change.path} at path ${fullPath}, index ${requestIndex}`
-    )
   }
 
   /**
@@ -1337,19 +1248,6 @@ export class SyncEngineService {
     },
     spec: any
   ): Promise<void> {
-    const isUrlChange = urlChange.oldPath !== urlChange.newPath
-    const isMethodChange = urlChange.oldMethod !== urlChange.newMethod
-
-    if (isUrlChange) {
-      console.log(
-        `Handling URL change: ${urlChange.oldMethod} ${urlChange.oldPath} → ${urlChange.newMethod} ${urlChange.newPath}`
-      )
-    } else if (isMethodChange) {
-      console.log(
-        `Handling method change: ${urlChange.oldMethod} ${urlChange.oldPath} → ${urlChange.newMethod} ${urlChange.oldPath}`
-      )
-    }
-
     // Find the existing request by old path and method
     const oldEndpointPath = `${urlChange.oldMethod} ${urlChange.oldPath}`
     const existingRequestInfo = this.findRequestInCollection(
@@ -1360,9 +1258,6 @@ export class SyncEngineService {
 
     if (!existingRequestInfo) {
       // Can't find existing request, fall back to add new
-      console.log(
-        `Could not find existing request for ${oldEndpointPath}, adding new endpoint`
-      )
       await this.addEndpointToCollection(collection, {
         type: "endpoint-added",
         path: `${urlChange.newMethod} ${urlChange.newPath}`,
@@ -1398,16 +1293,6 @@ export class SyncEngineService {
         ? `${collectionIndex}/${folderPath}`
         : collectionIndex.toString()
     editRESTRequest(fullPath, requestIndex, updatedRequest)
-
-    if (isUrlChange) {
-      console.log(
-        `Updated endpoint URL from ${urlChange.oldPath} to ${urlChange.newPath} at path ${fullPath}, index ${requestIndex}`
-      )
-    } else {
-      console.log(
-        `Updated endpoint method from ${urlChange.oldMethod} to ${urlChange.newMethod} at path ${fullPath}, index ${requestIndex}`
-      )
-    }
   }
 
   /**
@@ -1417,8 +1302,6 @@ export class SyncEngineService {
     collection: LiveSyncCollection,
     change: any
   ): Promise<void> {
-    console.log(`Removing endpoint: ${change.path}`)
-
     // Parse the endpoint path (format: "GET /users/{id}")
     const [method, path] = change.path.split(" ", 2)
 
@@ -1444,8 +1327,6 @@ export class SyncEngineService {
       const matchesPath = r.endpoint.includes(path)
       return !(matchesMethod && matchesPath)
     })
-
-    console.log(`Removed endpoint: ${change.path}`)
   }
 
   /**
@@ -1455,8 +1336,6 @@ export class SyncEngineService {
     collection: LiveSyncCollection,
     change: any
   ): Promise<void> {
-    console.log(`Updating parameters for: ${change.path}`)
-
     // This would update the parameters of an existing request
     // For now, we'll treat it as an endpoint update
     await this.updateEndpointInCollection(collection, change)
@@ -1629,8 +1508,6 @@ export class SyncEngineService {
   }
 
   private async performSync(sourceId: string): Promise<SyncResult> {
-    console.log(`Starting sync for source: ${sourceId}`)
-
     try {
       // Find the collection
       const collection = findCollectionBySourceId(sourceId)
@@ -1654,16 +1531,6 @@ export class SyncEngineService {
         }
       }
 
-      console.log(`Fetching latest spec for source: ${sourceId}`)
-
-      // Get the OLD spec BEFORE fetching the new one
-      const oldSpec = this.getStoredSpec(sourceId)
-      if (oldSpec) {
-        console.log(
-          `Found previous spec with ${Object.keys(oldSpec?.paths || {}).length} endpoints`
-        )
-      }
-
       // Fetch the latest spec using the live spec source service
       const fetchResult = await liveSpecSourceService.fetchSpec(sourceId)
 
@@ -1680,8 +1547,6 @@ export class SyncEngineService {
         }
       }
 
-      console.log(`Successfully fetched spec for source: ${sourceId}`)
-
       // Perform sync with the collection BEFORE storing the new spec
       // This ensures syncExistingCollection can get the old spec
       const syncResult = await this.syncExistingCollection(
@@ -1696,12 +1561,6 @@ export class SyncEngineService {
         fetchResult.spec,
         source.type === "url" ? (source.config as URLSourceConfig).url : ""
       )
-
-      console.log(`Sync completed for source: ${sourceId}`, {
-        success: syncResult.success,
-        hasChanges: syncResult.changes?.hasChanges,
-        errors: syncResult.errors?.length || 0,
-      })
 
       return syncResult
     } catch (error) {

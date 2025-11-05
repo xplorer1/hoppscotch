@@ -139,7 +139,6 @@ export class LiveSpecSourceServiceImpl implements LiveSpecSourceService {
         this.sources.set(source.id, source)
       })
       this.sourcesLoaded = true
-      console.log(`Loaded ${sources.length} live sync sources from storage`)
     } catch (error) {
       console.error("Failed to load sources from storage:", error)
       this.sourcesLoaded = true // Mark as loaded even on error to prevent infinite retries
