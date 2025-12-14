@@ -35,7 +35,10 @@ export class SpecDiffEngine {
 
     // Auto-generate operationId for specs that don't have them
     const normalizedOldSpec = this.ensureOperationIds(oldSpec)
-    const normalizedNewSpec = this.ensureOperationIds(newSpec, normalizedOldSpec)
+    const normalizedNewSpec = this.ensureOperationIds(
+      newSpec,
+      normalizedOldSpec
+    )
 
     // Generate hashes for the specs
     const oldSpecHash = this.generateSpecHash(normalizedOldSpec)
@@ -87,23 +90,32 @@ export class SpecDiffEngine {
 
     for (const path in paths) {
       const pathItem = paths[path]
-      const httpMethods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head']
+      const httpMethods = [
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "options",
+        "head",
+      ]
 
       for (const method of httpMethods) {
         if (pathItem[method]) {
           const operation = pathItem[method]
-          
+
           // Only generate operationId if it doesn't exist
           if (!operation.operationId) {
             // Try to preserve operationId from the previous spec if it exists
             const preservedOperationId = this.findPreservedOperationId(
-              method, 
-              path, 
-              operation, 
+              method,
+              path,
+              operation,
               preserveFrom
             )
-            
-            operation.operationId = preservedOperationId || 
+
+            operation.operationId =
+              preservedOperationId ||
               this.generateOperationId(method, path, operation)
           }
         }
@@ -117,9 +129,9 @@ export class SpecDiffEngine {
    * Try to find an existing operationId from a previous spec that should be preserved
    */
   private findPreservedOperationId(
-    method: string, 
-    path: string, 
-    operation: any, 
+    method: string,
+    path: string,
+    operation: any,
     oldSpec?: any
   ): string | null {
     if (!oldSpec?.paths) return null
@@ -134,7 +146,15 @@ export class SpecDiffEngine {
     // This helps when method or path changes but we want to preserve the ID
     for (const oldPath in oldSpec.paths) {
       const oldPathItem = oldSpec.paths[oldPath]
-      for (const oldMethod of ['get', 'post', 'put', 'delete', 'patch', 'options', 'head']) {
+      for (const oldMethod of [
+        "get",
+        "post",
+        "put",
+        "delete",
+        "patch",
+        "options",
+        "head",
+      ]) {
         const oldOperation = oldPathItem[oldMethod]
         if (oldOperation?.operationId) {
           // If the summary matches, preserve the operationId
@@ -152,18 +172,24 @@ export class SpecDiffEngine {
   /**
    * Generate a stable operationId from method, path, and operation details
    */
-  private generateOperationId(method: string, path: string, operation: any): string {
+  private generateOperationId(
+    method: string,
+    path: string,
+    operation: any
+  ): string {
     // Strategy 1: Use summary if available (most descriptive)
     if (operation.summary) {
       const cleanSummary = operation.summary
-        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
-        .replace(/\s+/g, ' ')           // Normalize spaces
+        .replace(/[^a-zA-Z0-9\s]/g, "") // Remove special chars
+        .replace(/\s+/g, " ") // Normalize spaces
         .trim()
-        .split(' ')
-        .map((word: string, index: number) => 
-          index === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        .split(" ")
+        .map((word: string, index: number) =>
+          index === 0
+            ? word.toLowerCase()
+            : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
         )
-        .join('')
+        .join("")
 
       if (cleanSummary.length > 0) {
         return cleanSummary
@@ -172,15 +198,18 @@ export class SpecDiffEngine {
 
     // Strategy 2: Generate from method + path (fallback)
     const cleanPath = path
-      .replace(/\{[^}]*\}/g, '')      // Remove path parameters completely
-      .replace(/[^a-zA-Z0-9\/]/g, '') // Remove special chars except /
-      .split('/')
-      .filter(segment => segment.length > 0)
-      .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase())
-      .join('')
+      .replace(/\{[^}]*\}/g, "") // Remove path parameters completely
+      .replace(/[^a-zA-Z0-9\/]/g, "") // Remove special chars except /
+      .split("/")
+      .filter((segment) => segment.length > 0)
+      .map(
+        (segment) =>
+          segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase()
+      )
+      .join("")
 
     const methodName = method.toLowerCase()
-    
+
     if (cleanPath.length > 0) {
       return `${methodName}${cleanPath}`
     }

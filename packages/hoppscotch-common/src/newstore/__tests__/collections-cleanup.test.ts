@@ -66,10 +66,17 @@ describe("Collection Cleanup on Deletion", () => {
     if (collectionToRemove?.liveMetadata?.sourceId) {
       setTimeout(async () => {
         try {
-          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
-          await liveSyncManagerService.stopLiveSync(collectionToRemove.liveMetadata!.sourceId)
+          const { liveSyncManagerService } = await import(
+            "~/services/live-sync-manager.service"
+          )
+          await liveSyncManagerService.stopLiveSync(
+            collectionToRemove.liveMetadata!.sourceId
+          )
         } catch (error) {
-          console.error(`Failed to cleanup live sync for collection ${collectionToRemove.name}:`, error)
+          console.error(
+            `Failed to cleanup live sync for collection ${collectionToRemove.name}:`,
+            error
+          )
         }
       }, 0)
     }
@@ -101,10 +108,17 @@ describe("Collection Cleanup on Deletion", () => {
       // This should not execute for regular collections
       setTimeout(async () => {
         try {
-          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
-          await liveSyncManagerService.stopLiveSync(collectionToRemove.liveMetadata!.sourceId)
+          const { liveSyncManagerService } = await import(
+            "~/services/live-sync-manager.service"
+          )
+          await liveSyncManagerService.stopLiveSync(
+            collectionToRemove.liveMetadata!.sourceId
+          )
         } catch (error) {
-          console.error(`Failed to cleanup live sync for collection ${collectionToRemove.name}:`, error)
+          console.error(
+            `Failed to cleanup live sync for collection ${collectionToRemove.name}:`,
+            error
+          )
         }
       }, 0)
     }
