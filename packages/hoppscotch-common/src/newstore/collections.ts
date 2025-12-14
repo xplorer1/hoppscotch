@@ -191,9 +191,41 @@ function reorderItems(array: unknown[], from: number, to: number) {
 
 const restCollectionDispatchers = defineDispatchers({
   setCollections(
-    _: RESTCollectionStoreType,
+    currentState: RESTCollectionStoreType,
     { entries }: { entries: HoppCollection[] }
   ) {
+    // Check for live sync collections being removed when setting new collections
+    const currentCollections = currentState.state
+    const newCollectionSourceIds = new Set(
+      entries
+        .filter(isLiveSyncCollection)
+        .map(col => col.liveMetadata?.sourceId)
+        .filter((sourceId): sourceId is string => Boolean(sourceId))
+    )
+
+    // Find live sync collections that are being removed
+    const removedLiveSyncCollections = currentCollections
+      .filter(isLiveSyncCollection)
+      .filter(col => col.liveMetadata?.sourceId && !newCollectionSourceIds.has(col.liveMetadata.sourceId))
+
+    // Cleanup removed live sync collections
+    if (removedLiveSyncCollections.length > 0) {
+      setTimeout(async () => {
+        try {
+          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
+          
+          for (const collection of removedLiveSyncCollections) {
+            if (collection.liveMetadata?.sourceId) {
+              await liveSyncManagerService.stopLiveSync(collection.liveMetadata.sourceId)
+              console.log(`Cleaned up live sync session for collection: ${collection.name}`)
+            }
+          }
+        } catch (error) {
+          console.error("Failed to cleanup live sync collections during setCollections:", error)
+        }
+      }, 0)
+    }
+
     return {
       state: entries,
     }
@@ -226,6 +258,25 @@ const restCollectionDispatchers = defineDispatchers({
       collectionID,
     }: { collectionIndex: number; collectionID?: string }
   ) {
+    // Check if the collection being removed has live sync metadata
+    const collectionToRemove = state[collectionIndex] as LiveSyncCollection
+    if (collectionToRemove?.liveMetadata?.sourceId) {
+      // Perform live sync cleanup asynchronously to avoid blocking the state update
+      setTimeout(async () => {
+        try {
+          // Import the live sync manager service dynamically to avoid circular dependencies
+          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
+          
+          // Stop the live sync session for this collection
+          await liveSyncManagerService.stopLiveSync(collectionToRemove.liveMetadata!.sourceId)
+          
+          console.log(`Cleaned up live sync session for collection: ${collectionToRemove.name}`)
+        } catch (error) {
+          console.error(`Failed to cleanup live sync for collection ${collectionToRemove.name}:`, error)
+        }
+      }, 0)
+    }
+
     return {
       state: (state as any).filter(
         (_: any, i: number) => i !== collectionIndex
@@ -344,6 +395,25 @@ const restCollectionDispatchers = defineDispatchers({
         `Could not resolve path '${path}'. Skipping removeFolder dispatch.`
       )
       return {}
+    }
+
+    // Get the folder being removed to check for live sync collections
+    const folderToRemove = containingFolder.folders[folderIndex]
+    if (folderToRemove) {
+      // Recursively find and cleanup live sync collections in the folder
+      setTimeout(async () => {
+        try {
+          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
+          const liveSyncSourceIds = collectLiveSyncSourceIds(folderToRemove)
+          
+          for (const sourceId of liveSyncSourceIds) {
+            await liveSyncManagerService.stopLiveSync(sourceId)
+            console.log(`Cleaned up live sync session for sourceId: ${sourceId}`)
+          }
+        } catch (error) {
+          console.error(`Failed to cleanup live sync for folder ${folderToRemove.name}:`, error)
+        }
+      }, 0)
     }
 
     containingFolder.folders.splice(folderIndex, 1)
@@ -1056,9 +1126,41 @@ const restCollectionDispatchers = defineDispatchers({
 
 const gqlCollectionDispatchers = defineDispatchers({
   setCollections(
-    _: GraphqlCollectionStoreType,
+    currentState: GraphqlCollectionStoreType,
     { entries }: { entries: HoppCollection[] }
   ) {
+    // Check for live sync collections being removed when setting new collections
+    const currentCollections = currentState.state
+    const newCollectionSourceIds = new Set(
+      entries
+        .filter(isLiveSyncCollection)
+        .map(col => col.liveMetadata?.sourceId)
+        .filter((sourceId): sourceId is string => Boolean(sourceId))
+    )
+
+    // Find live sync collections that are being removed
+    const removedLiveSyncCollections = currentCollections
+      .filter(isLiveSyncCollection)
+      .filter(col => col.liveMetadata?.sourceId && !newCollectionSourceIds.has(col.liveMetadata.sourceId))
+
+    // Cleanup removed live sync collections
+    if (removedLiveSyncCollections.length > 0) {
+      setTimeout(async () => {
+        try {
+          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
+          
+          for (const collection of removedLiveSyncCollections) {
+            if (collection.liveMetadata?.sourceId) {
+              await liveSyncManagerService.stopLiveSync(collection.liveMetadata.sourceId)
+              console.log(`Cleaned up live sync session for GraphQL collection: ${collection.name}`)
+            }
+          }
+        } catch (error) {
+          console.error("Failed to cleanup live sync GraphQL collections during setCollections:", error)
+        }
+      }, 0)
+    }
+
     return {
       state: entries,
     }
@@ -1090,6 +1192,25 @@ const gqlCollectionDispatchers = defineDispatchers({
       collectionID,
     }: { collectionIndex: number; collectionID?: string }
   ) {
+    // Check if the collection being removed has live sync metadata
+    const collectionToRemove = state[collectionIndex] as LiveSyncCollection
+    if (collectionToRemove?.liveMetadata?.sourceId) {
+      // Perform live sync cleanup asynchronously to avoid blocking the state update
+      setTimeout(async () => {
+        try {
+          // Import the live sync manager service dynamically to avoid circular dependencies
+          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
+          
+          // Stop the live sync session for this collection
+          await liveSyncManagerService.stopLiveSync(collectionToRemove.liveMetadata!.sourceId)
+          
+          console.log(`Cleaned up live sync session for GraphQL collection: ${collectionToRemove.name}`)
+        } catch (error) {
+          console.error(`Failed to cleanup live sync for GraphQL collection ${collectionToRemove.name}:`, error)
+        }
+      }, 0)
+    }
+
     return {
       state: (state as any).filter(
         (_: any, i: number) => i !== collectionIndex
@@ -1196,6 +1317,25 @@ const gqlCollectionDispatchers = defineDispatchers({
         `Could not resolve path '${path}'. Skipping removeFolder dispatch.`
       )
       return {}
+    }
+
+    // Get the folder being removed to check for live sync collections
+    const folderToRemove = containingFolder.folders[folderIndex]
+    if (folderToRemove) {
+      // Recursively find and cleanup live sync collections in the folder
+      setTimeout(async () => {
+        try {
+          const { liveSyncManagerService } = await import("~/services/live-sync-manager.service")
+          const liveSyncSourceIds = collectLiveSyncSourceIds(folderToRemove)
+          
+          for (const sourceId of liveSyncSourceIds) {
+            await liveSyncManagerService.stopLiveSync(sourceId)
+            console.log(`Cleaned up live sync session for GraphQL sourceId: ${sourceId}`)
+          }
+        } catch (error) {
+          console.error(`Failed to cleanup live sync for GraphQL folder ${folderToRemove.name}:`, error)
+        }
+      }, 0)
     }
 
     containingFolder.folders.splice(folderIndex, 1)
@@ -1438,6 +1578,25 @@ export function isLiveSyncCollection(
   return (
     "liveMetadata" in collection && collection.liveMetadata?.isLiveSync === true
   )
+}
+
+/**
+ * Recursively collect all live sync source IDs from a collection and its subfolders
+ */
+function collectLiveSyncSourceIds(collection: HoppCollection): string[] {
+  const sourceIds: string[] = []
+  
+  // Check if this collection has live sync metadata
+  if (isLiveSyncCollection(collection) && collection.liveMetadata?.sourceId) {
+    sourceIds.push(collection.liveMetadata.sourceId)
+  }
+  
+  // Recursively check all subfolders
+  for (const folder of collection.folders) {
+    sourceIds.push(...collectLiveSyncSourceIds(folder))
+  }
+  
+  return sourceIds
 }
 
 /**

@@ -21,9 +21,10 @@ import {
   findCollectionBySourceId,
   saveRESTRequestAs,
   editRESTRequest,
-  getCollectionIndex,
   addRESTFolder,
   restCollectionStore,
+  getLiveSyncCollections,
+  setCollectionLiveMetadata,
 } from "~/newstore/collections"
 import {
   LiveSyncCollection,
@@ -234,6 +235,8 @@ export class SyncEngineService {
         url,
       }
 
+
+
       this.storedSpecs.set(sourceId, storedSpec)
 
       // Cleanup old specs if we exceed the limit
@@ -362,9 +365,13 @@ export class SyncEngineService {
       // Get the old spec from storage
       const oldSpec = this.getStoredSpec(sourceId)
 
+
+
       if (!oldSpec) {
         // First sync - no comparison needed, just apply the spec
-        const conflicts = await this.applyChangesToCollection(collection, {
+        const conflicts = await this.applyChangesToCollection(
+        collection,
+        {
           hasChanges: true,
           changes: [], // No specific changes for initial sync
           summary: {
@@ -377,10 +384,13 @@ export class SyncEngineService {
           oldSpecHash: "",
           newSpecHash: this.generateFallbackHash(newSpec),
           comparedAt: new Date(),
-        })
+        },
+        newSpec,
+        sourceId
+      )
 
         // Update sync status
-        const collectionIndex = this.findCollectionIndex(sourceId)
+        const collectionIndex = this.findCollectionIndex(sourceId, collection)
         if (collectionIndex >= 0) {
           updateCollectionSyncStatus(
             collectionIndex,
@@ -426,14 +436,15 @@ export class SyncEngineService {
       }
 
       // Apply changes to collection
-      const conflicts = await this.applyChangesToCollection(
+        const conflicts = await this.applyChangesToCollection(
         collection,
         diffResult,
-        newSpec
+        newSpec,
+        sourceId
       )
 
       // Update sync status
-      const collectionIndex = this.findCollectionIndex(sourceId)
+      const collectionIndex = this.findCollectionIndex(sourceId, collection)
       if (collectionIndex >= 0) {
         updateCollectionSyncStatus(
           collectionIndex,
@@ -481,10 +492,11 @@ export class SyncEngineService {
   private async applyChangesToCollection(
     collection: LiveSyncCollection,
     diffResult: SpecDiffResult,
-    newSpec?: any
+    newSpec?: any,
+    sourceIdParam?: string
   ): Promise<SyncConflict[]> {
     const conflicts: SyncConflict[] = []
-    const sourceId = collection.liveMetadata?.sourceId || ""
+    const sourceId = sourceIdParam || collection.liveMetadata?.sourceId || ""
 
     // If this is an initial sync with no specific changes, rebuild the entire collection
     if (diffResult.changes.length === 0 && diffResult.hasChanges) {
@@ -637,9 +649,13 @@ export class SyncEngineService {
               if (paramChanges.length > 0) {
               }
 
-              await this.handleUrlChange(collection, urlChange, newSpec)
+              await this.handleUrlChange(collection, urlChange, newSpec, sourceId)
               processedUrlChanges.add(oldEndpointPath)
               processedUrlChanges.add(newEndpointPath)
+              // Also mark the operation ID or summary if available to prevent duplicates
+              if (urlChange.operation.operationId) {
+                processedUrlChanges.add(`operationId:${urlChange.operation.operationId}`)
+              }
             }
           }
 
@@ -667,16 +683,36 @@ export class SyncEngineService {
 
         switch (change.type) {
           case "endpoint-added":
-            await this.addEndpointToCollection(collection, {
-              ...change,
-              spec: newSpec,
-            })
+            // Check if this addition was already handled as part of a URL change
+            // by checking if the path matches any URL change's new path
+            const urlChangeForAddition = urlChangesByNewPath.get(change.path)
+            if (urlChangeForAddition) {
+              // This was part of a URL change - skip it (should have been handled)
+              continue
+            }
+            await this.addEndpointToCollection(
+              collection,
+              {
+                ...change,
+                spec: newSpec,
+              },
+              sourceId
+            )
             break
           case "endpoint-modified":
-            await this.updateEndpointInCollection(collection, {
-              ...change,
-              spec: newSpec,
-            })
+            try {
+              await this.updateEndpointInCollection(
+                collection,
+                {
+                  ...change,
+                  spec: newSpec,
+                },
+                sourceId
+              )
+            } catch (error) {
+              console.error(`Failed to update endpoint ${change.path}:`, error)
+              throw error
+            }
             break
           case "endpoint-removed":
             await this.removeEndpointFromCollection(collection, change)
@@ -752,7 +788,8 @@ export class SyncEngineService {
 
         // Replace the existing collection with the newly imported one
         const collectionIndex = this.findCollectionIndex(
-          collection.liveMetadata?.sourceId || ""
+          sourceId,
+          collection
         )
         if (collectionIndex >= 0) {
           // Clear existing collection
@@ -799,7 +836,8 @@ export class SyncEngineService {
    */
   private async addEndpointToCollection(
     collection: LiveSyncCollection,
-    change: any
+    change: any,
+    sourceId?: string
   ): Promise<void> {
     // Parse the endpoint path (format: "GET /users/{id}")
     const [method, path] = change.path.split(" ", 2)
@@ -808,32 +846,39 @@ export class SyncEngineService {
       throw new Error(`Invalid endpoint path format: ${change.path}`)
     }
 
+    const resolvedSourceId = sourceId || collection.liveMetadata?.sourceId || ""
+    const collectionIndex = this.findCollectionIndex(resolvedSourceId, collection)
+    if (collectionIndex < 0) {
+      throw new Error("Collection not found in store")
+    }
+
+    const collectionInStore = restCollectionStore.value.state[
+      collectionIndex
+    ] as LiveSyncCollection | undefined
+    const collectionForSearch = collectionInStore || collection
+
     // Check for duplicates before adding - match by path only (ignore method for duplicate check)
     // This prevents adding duplicates when method changes weren't detected as URL changes
     const existingByPath = this.findRequestInCollection(
-      collection,
+      collectionForSearch,
       `ANY ${path}`, // Use ANY to match any method
       path
     )
 
     if (existingByPath) {
       // Found an existing request with the same path - treat as update instead
-      await this.updateEndpointInCollection(collection, {
-        ...change,
-        oldValue: {
-          method: existingByPath.request.method,
-          path: path,
+      await this.updateEndpointInCollection(
+        collectionForSearch,
+        {
+          ...change,
+          oldValue: {
+            method: existingByPath.request.method,
+            path: path,
+          },
         },
-      })
+        resolvedSourceId
+      )
       return
-    }
-
-    // Get the collection index
-    const collectionIndex = this.findCollectionIndex(
-      collection.liveMetadata?.sourceId || ""
-    )
-    if (collectionIndex < 0) {
-      throw new Error("Collection not found in store")
     }
 
     // Create a new REST request from the spec
@@ -853,7 +898,7 @@ export class SyncEngineService {
     if (tags.length > 0) {
       // Find or create folder for the first tag
       const folderName = tags[0]
-      let folderIndex = collection.folders.findIndex(
+      let folderIndex = collectionForSearch.folders.findIndex(
         (f) => f.name === folderName
       )
 
@@ -891,7 +936,8 @@ export class SyncEngineService {
    */
   private async updateEndpointInCollection(
     collection: LiveSyncCollection,
-    change: any
+    change: any,
+    sourceId?: string
   ): Promise<void> {
     // Parse the endpoint path (format: "GET /users/{id}")
     const [method, path] = change.path.split(" ", 2)
@@ -899,21 +945,36 @@ export class SyncEngineService {
     if (!method || !path) {
       throw new Error(`Invalid endpoint path format: ${change.path}`)
     }
+    
+    // Debug: Log method/description updates
+    if (change.description && (
+        change.description.includes("Summary changed") || 
+        change.description.includes("Description changed") ||
+        change.description.includes("Method changed"))) {
+      console.log(`[Live Sync] Updating endpoint: ${change.path}`, {
+        description: change.description,
+        hasOldValue: !!change.oldValue,
+        hasNewValue: !!change.newValue,
+      })
+    }
 
-    // Get the collection index
-    const collectionIndex = this.findCollectionIndex(
-      collection.liveMetadata?.sourceId || ""
-    )
+    const resolvedSourceId = sourceId || collection.liveMetadata?.sourceId || ""
+    const collectionIndex = this.findCollectionIndex(resolvedSourceId, collection)
     if (collectionIndex < 0) {
       throw new Error("Collection not found in store")
     }
+
+    const collectionInStore = restCollectionStore.value.state[
+      collectionIndex
+    ] as LiveSyncCollection | undefined
+    const collectionForSearch = collectionInStore || collection
 
     // Find the existing request - try multiple strategies:
     // 1. By new path and method
     // 2. By old path and method (from oldValue)
     // 3. By path only (any method) - in case method changed
     let existingRequestInfo = this.findRequestInCollection(
-      collection,
+      collectionForSearch,
       change.path,
       path
     )
@@ -926,7 +987,7 @@ export class SyncEngineService {
         this.extractPathFromChange(change.oldValue, change.path)
       const oldEndpointPath = `${oldMethod} ${oldPath}`
       existingRequestInfo = this.findRequestInCollection(
-        collection,
+        collectionForSearch,
         oldEndpointPath,
         oldPath
       )
@@ -935,18 +996,29 @@ export class SyncEngineService {
     if (!existingRequestInfo) {
       // Try matching by path only (any method) - useful when method changes weren't detected
       existingRequestInfo = this.findRequestInCollection(
-        collection,
+        collectionForSearch,
         `ANY ${path}`,
         path
       )
     }
 
     if (!existingRequestInfo) {
+      const availableEndpoints = this.getCollectionEndpointSummary(
+        collectionForSearch
+      )
+      console.warn(
+        `[Live Sync] Could not find existing request for ${change.path}`,
+        availableEndpoints
+      )
       // Request not found - treat as new endpoint
-      await this.addEndpointToCollection(collection, {
-        ...change,
-        spec: change.spec || {},
-      })
+      await this.addEndpointToCollection(
+        collection,
+        {
+          ...change,
+          spec: change.spec || {},
+        },
+        resolvedSourceId
+      )
       return
     }
 
@@ -995,6 +1067,40 @@ export class SyncEngineService {
     editRESTRequest(fullPath, requestIndex, updatedRequest)
   }
 
+  private normalizeEndpointPath(path: string): string {
+    return (
+      (path || "")
+        .replace(/{{baseURL}}/g, "")
+        .replace(/^\/+/, "/")
+        .replace(/\/+$/, "") || "/"
+    )
+  }
+
+  private getCollectionEndpointSummary(
+    collection: LiveSyncCollection
+  ): string[] {
+    const endpoints: string[] = []
+
+    const addEndpoint = (request: HoppRESTRequest | undefined) => {
+      if (!request) return
+      const normalizedPath = this.normalizeEndpointPath(request.endpoint || "")
+      const method = (request.method || "UNKNOWN").toString().toUpperCase()
+      endpoints.push(`${method} ${normalizedPath}`)
+    }
+
+    collection.folders.forEach((folder) => {
+      folder.requests.forEach((req: unknown) =>
+        addEndpoint(req as HoppRESTRequest)
+      )
+    })
+
+    collection.requests.forEach((req: unknown) =>
+      addEndpoint(req as HoppRESTRequest)
+    )
+
+    return endpoints
+  }
+
   /**
    * Find a request in the collection by matching method and path
    */
@@ -1012,21 +1118,7 @@ export class SyncEngineService {
     const method = parts.length === 2 ? parts[0].toUpperCase() : null
 
     // Normalize matchPath (remove {baseURL} and extra slashes, exact match preferred)
-    const normalizedMatchPath =
-      matchPath
-        .replace(/{{baseURL}}/g, "")
-        .replace(/^\/+/, "/")
-        .replace(/\/+$/, "") || "/"
-
-    // Helper to normalize and compare paths exactly
-    const normalizePath = (path: string): string => {
-      return (
-        path
-          .replace(/{{baseURL}}/g, "")
-          .replace(/^\/+/, "/")
-          .replace(/\/+$/, "") || "/"
-      )
-    }
+    const normalizedMatchPath = this.normalizeEndpointPath(matchPath)
 
     // If method is "ANY", we're doing a path-only match (ignore method)
     const matchAnyMethod = method === "ANY"
@@ -1040,9 +1132,11 @@ export class SyncEngineService {
       const folder = collection.folders[folderIndex]
       for (let i = 0; i < folder.requests.length; i++) {
         const request = folder.requests[i]
-        const requestPath = normalizePath(request.endpoint)
+        const requestPath = this.normalizeEndpointPath(request.endpoint)
         const matchesMethod =
-          matchAnyMethod || !method || request.method === method
+          matchAnyMethod ||
+          !method ||
+          (request.method && request.method.toUpperCase() === method)
 
         // Exact path match preferred, fallback to contains for parameter variations
         const matchesPath =
@@ -1061,9 +1155,13 @@ export class SyncEngineService {
     // Search in root requests
     for (let i = 0; i < collection.requests.length; i++) {
       const request = collection.requests[i] as HoppRESTRequest
-      const requestPath = normalizePath(request.endpoint as string)
+      const requestPath = this.normalizeEndpointPath(
+        request.endpoint as string
+      )
       const matchesMethod =
-        matchAnyMethod || !method || request.method === method
+        matchAnyMethod ||
+        !method ||
+        (request.method && request.method.toUpperCase() === method)
 
       // Exact path match preferred
       const matchesPath =
@@ -1246,31 +1344,133 @@ export class SyncEngineService {
       newMethod: string
       operation: any
     },
-    spec: any
-  ): Promise<void> {
+    spec: any,
+    sourceId?: string
+  ): Promise<{ updated: boolean; found: boolean }> {
     // Find the existing request by old path and method
     const oldEndpointPath = `${urlChange.oldMethod} ${urlChange.oldPath}`
+    const resolvedSourceId = sourceId || collection.liveMetadata?.sourceId || ""
+    const collectionIndex = this.findCollectionIndex(resolvedSourceId, collection)
+    const collectionInStore =
+      collectionIndex >= 0
+        ? (restCollectionStore.value.state[collectionIndex] as LiveSyncCollection)
+        : undefined
+    const collectionForSearch = collectionInStore || collection
+
     const existingRequestInfo = this.findRequestInCollection(
-      collection,
+      collectionForSearch,
       oldEndpointPath,
       urlChange.oldPath
     )
 
     if (!existingRequestInfo) {
-      // Can't find existing request, fall back to add new
-      await this.addEndpointToCollection(collection, {
-        type: "endpoint-added",
-        path: `${urlChange.newMethod} ${urlChange.newPath}`,
-        newValue: urlChange.operation,
-        spec,
-      })
-      return
+      // Can't find existing request by old path - try finding by new path
+      // (in case the endpoint was already updated in a previous sync)
+      const newEndpointPath = `${urlChange.newMethod} ${urlChange.newPath}`
+      const existingByNewPath = this.findRequestInCollection(
+        collectionForSearch,
+        newEndpointPath,
+        urlChange.newPath
+      )
+      
+      if (existingByNewPath) {
+        // Request already exists with new path - just update it
+        if (collectionIndex < 0) {
+          throw new Error("Collection not found in store")
+        }
+        
+        const { request, folderPath, requestIndex } = existingByNewPath
+        const updatedRequest = this.createRequestFromSpec(
+          urlChange.newPath,
+          urlChange.newMethod,
+          urlChange.operation,
+          spec
+        )
+        updatedRequest.responses = request.responses || {}
+        
+        // Update name intelligently
+        const oldExpectedName = 
+          `${urlChange.oldMethod} ${urlChange.oldPath}`
+        const wasNameFromSpec = request.name === oldExpectedName || 
+          request.name.includes(urlChange.oldMethod) || 
+          request.name.includes(urlChange.oldPath.split('/').pop() || '')
+
+        const newExpectedName = 
+          urlChange.operation.summary || 
+          urlChange.operation.operationId || 
+          `${urlChange.newMethod} ${urlChange.newPath}`
+
+        if (wasNameFromSpec) {
+          updatedRequest.name = newExpectedName
+        } else {
+          updatedRequest.name = request.name
+        }
+        
+        const fullPath =
+          folderPath !== undefined
+            ? `${collectionIndex}/${folderPath}`
+            : collectionIndex.toString()
+        editRESTRequest(fullPath, requestIndex, updatedRequest)
+        return { updated: true, found: true }
+      }
+      
+      // Still can't find it - this means it's a genuinely new endpoint
+      // But we should check if maybe the old path exists but with a different method
+      // Try finding with ANY method to see if path exists
+      const existingByPath = this.findRequestInCollection(
+        collectionForSearch,
+        `ANY ${urlChange.oldPath}`,
+        urlChange.oldPath
+      )
+      
+      if (existingByPath) {
+        // Found by path but different method - update it
+        if (collectionIndex < 0) {
+          throw new Error("Collection not found in store")
+        }
+        
+        const { request, folderPath, requestIndex } = existingByPath
+        const updatedRequest = this.createRequestFromSpec(
+          urlChange.newPath,
+          urlChange.newMethod,
+          urlChange.operation,
+          spec
+        )
+        updatedRequest.responses = request.responses || {}
+        
+        // Update name intelligently
+        const oldExpectedName = 
+          `${urlChange.oldMethod} ${urlChange.oldPath}`
+        const wasNameFromSpec = request.name === oldExpectedName || 
+          request.name.includes(urlChange.oldMethod) || 
+          request.name.includes(urlChange.oldPath.split('/').pop() || '')
+
+        const newExpectedName = 
+          urlChange.operation.summary || 
+          urlChange.operation.operationId || 
+          `${urlChange.newMethod} ${urlChange.newPath}`
+
+        if (wasNameFromSpec) {
+          updatedRequest.name = newExpectedName
+        } else {
+          updatedRequest.name = request.name
+        }
+        
+        const fullPath =
+          folderPath !== undefined
+            ? `${collectionIndex}/${folderPath}`
+            : collectionIndex.toString()
+        editRESTRequest(fullPath, requestIndex, updatedRequest)
+        return { updated: true, found: true }
+      }
+      
+      // Truly can't find existing request - this shouldn't happen for URL changes
+      // But if it does, we should still prevent the addition from creating a duplicate
+      // by marking it as processed. The addition will be skipped by the check above.
+      return { updated: false, found: false }
     }
 
     // Get collection index
-    const collectionIndex = this.findCollectionIndex(
-      collection.liveMetadata?.sourceId || ""
-    )
     if (collectionIndex < 0) {
       throw new Error("Collection not found in store")
     }
@@ -1285,7 +1485,28 @@ export class SyncEngineService {
       spec
     )
     updatedRequest.responses = request.responses || {} // Preserve existing responses
-    updatedRequest.name = request.name || updatedRequest.name // Preserve custom name
+
+    // Update name intelligently - same logic as updateEndpointInCollection
+    // Check if the old name matches what the old spec would have generated
+    const oldExpectedName = 
+      `${urlChange.oldMethod} ${urlChange.oldPath}` // Fallback if no summary
+    const wasNameFromSpec = request.name === oldExpectedName || 
+      request.name.includes(urlChange.oldMethod) || 
+      request.name.includes(urlChange.oldPath.split('/').pop() || '')
+
+    // Get the new expected name from the operation
+    const newExpectedName = 
+      urlChange.operation.summary || 
+      urlChange.operation.operationId || 
+      `${urlChange.newMethod} ${urlChange.newPath}`
+
+    if (wasNameFromSpec) {
+      // Name came from spec, update it with new summary/operationId
+      updatedRequest.name = newExpectedName
+    } else {
+      // Name was customized, preserve it
+      updatedRequest.name = request.name
+    }
 
     // Update the request in place
     const fullPath =
@@ -1293,6 +1514,8 @@ export class SyncEngineService {
         ? `${collectionIndex}/${folderPath}`
         : collectionIndex.toString()
     editRESTRequest(fullPath, requestIndex, updatedRequest)
+    
+    return { updated: true, found: true }
   }
 
   /**
@@ -1338,7 +1561,11 @@ export class SyncEngineService {
   ): Promise<void> {
     // This would update the parameters of an existing request
     // For now, we'll treat it as an endpoint update
-    await this.updateEndpointInCollection(collection, change)
+    await this.updateEndpointInCollection(
+      collection,
+      change,
+      collection.liveMetadata?.sourceId
+    )
   }
 
   // Removed unused addEndpointFromSpec and createRequestFromEndpoint methods
@@ -1498,28 +1725,103 @@ export class SyncEngineService {
     return res
   }
 
-  private findCollectionIndex(sourceId: string): number {
-    // Find the index of a collection in the store
-    const collection = findCollectionBySourceId(sourceId)
-    if (!collection) {
-      return -1
+  private findCollectionIndex(
+    sourceId: string,
+    fallbackCollection?: LiveSyncCollection
+  ): number {
+    const collections = restCollectionStore.value.state
+
+    let effectiveSourceId = sourceId
+
+    if (!effectiveSourceId && fallbackCollection?.liveMetadata?.sourceId) {
+      effectiveSourceId = fallbackCollection.liveMetadata.sourceId
     }
-    return getCollectionIndex(collection)
+
+    if (effectiveSourceId) {
+      const indexBySourceId = collections.findIndex(
+        (col): col is LiveSyncCollection =>
+          "liveMetadata" in col &&
+          (col as LiveSyncCollection).liveMetadata?.sourceId === effectiveSourceId
+      )
+
+      if (indexBySourceId >= 0) {
+        return indexBySourceId
+      }
+    }
+
+    if (fallbackCollection) {
+      // Try direct reference match first
+      const indexByReference = collections.indexOf(fallbackCollection)
+      if (indexByReference >= 0) {
+        return indexByReference
+      }
+
+      // Fallback to name matching if reference differs (e.g., clone)
+      const indexByName = collections.findIndex(
+        (col) => col.name === fallbackCollection.name
+      )
+      if (indexByName >= 0) {
+        return indexByName
+      }
+    }
+
+    return -1
   }
 
   private async performSync(sourceId: string): Promise<SyncResult> {
     try {
       // Find the collection
-      const collection = findCollectionBySourceId(sourceId)
+      let collection = findCollectionBySourceId(sourceId)
+      
       if (!collection) {
-        console.error(`Collection not found for source: ${sourceId}`)
-        return {
-          success: false,
-          errors: ["Collection not found"],
+        // Try to find by checking all collections (fallback for missing metadata)
+        const allCollections = restCollectionStore.value.state
+        const source = liveSpecSourceService.getSource(sourceId)
+        
+        if (source) {
+          // Try matching by name as fallback
+          const byName = allCollections.find(col => col.name === source.name)
+          if (byName && "liveMetadata" in byName) {
+            const liveCol = byName as LiveSyncCollection
+            // Ensure it has the correct sourceId
+            const collectionIndex = allCollections.indexOf(byName)
+            if (collectionIndex >= 0) {
+              setCollectionLiveMetadata(collectionIndex, {
+                isLiveSync: true,
+                sourceId: source.id,
+                ...(liveCol.liveMetadata ? {
+                  lastSyncTime: liveCol.liveMetadata.lastSyncTime,
+                  syncStrategy: liveCol.liveMetadata.syncStrategy || "incremental",
+                  customizations: liveCol.liveMetadata.customizations,
+                  originalSpecHash: liveCol.liveMetadata.originalSpecHash,
+                  syncConfig: liveCol.liveMetadata.syncConfig,
+                } : {
+                  syncStrategy: "incremental" as const,
+                  syncConfig: { autoSync: true, syncInterval: 30000 },
+                }),
+              } as any)
+              // Re-read from store
+              collection = restCollectionStore.value.state[collectionIndex] as LiveSyncCollection
+            }
+          }
+        }
+        
+        if (!collection) {
+          console.error(`Collection not found for source: ${sourceId}`)
+          // Log available collections for debugging
+          const availableCollections = getLiveSyncCollections()
+          console.error(`Available live sync collections: ${availableCollections.length}`)
+          availableCollections.forEach(col => {
+            console.error(`  - "${col.name}" (sourceId: ${col.liveMetadata?.sourceId})`)
+          })
+          return {
+            success: false,
+            errors: ["Collection not found"],
+          }
         }
       }
 
-      // Get the source from live spec source service
+      // Get the source from live spec source service (if not already retrieved)
       const source = liveSpecSourceService.getSource(sourceId)
       if (!source) {
         console.error(

@@ -33,9 +33,13 @@ export class SpecDiffEngine {
   async compareSpecs(oldSpec: any, newSpec: any): Promise<SpecDiffResult> {
     const changes: SpecChange[] = []
 
+    // Auto-generate operationId for specs that don't have them
+    const normalizedOldSpec = this.ensureOperationIds(oldSpec)
+    const normalizedNewSpec = this.ensureOperationIds(newSpec, normalizedOldSpec)
+
     // Generate hashes for the specs
-    const oldSpecHash = this.generateSpecHash(oldSpec)
-    const newSpecHash = this.generateSpecHash(newSpec)
+    const oldSpecHash = this.generateSpecHash(normalizedOldSpec)
+    const newSpecHash = this.generateSpecHash(normalizedNewSpec)
 
     // If hashes are the same, no changes
     if (oldSpecHash === newSpecHash) {
@@ -56,8 +60,8 @@ export class SpecDiffEngine {
     }
 
     // Compare different sections of the spec
-    changes.push(...this.compareEndpoints(oldSpec, newSpec))
-    changes.push(...this.compareSchemas(oldSpec, newSpec))
+    changes.push(...this.compareEndpoints(normalizedOldSpec, normalizedNewSpec))
+    changes.push(...this.compareSchemas(normalizedOldSpec, normalizedNewSpec))
 
     // Generate summary
     const summary = this.generateSummary(changes)
@@ -70,6 +74,133 @@ export class SpecDiffEngine {
       newSpecHash,
       comparedAt: new Date(),
     }
+  }
+
+  /**
+   * Ensure all operations have operationId for reliable endpoint tracking
+   */
+  private ensureOperationIds(spec: any, preserveFrom?: any): any {
+    if (!spec?.paths) return spec
+
+    const normalizedSpec = JSON.parse(JSON.stringify(spec)) // Deep clone
+    const paths = normalizedSpec.paths
+
+    for (const path in paths) {
+      const pathItem = paths[path]
+      const httpMethods = ['get', 'post', 'put', 'delete', 'patch', 'options', 'head']
+
+      for (const method of httpMethods) {
+        if (pathItem[method]) {
+          const operation = pathItem[method]
+          
+          // Only generate operationId if it doesn't exist
+          if (!operation.operationId) {
+            // Try to preserve operationId from the previous spec if it exists
+            const preservedOperationId = this.findPreservedOperationId(
+              method, 
+              path, 
+              operation, 
+              preserveFrom
+            )
+            
+            operation.operationId = preservedOperationId || 
+              this.generateOperationId(method, path, operation)
+          }
+        }
+      }
+    }
+
+    return normalizedSpec
+  }
+
+  /**
+   * Try to find an existing operationId from a previous spec that should be preserved
+   */
+  private findPreservedOperationId(
+    method: string, 
+    path: string, 
+    operation: any, 
+    oldSpec?: any
+  ): string | null {
+    if (!oldSpec?.paths) return null
+
+    // First, try to find exact match by path and method
+    const oldPathItem = oldSpec.paths[path]
+    if (oldPathItem?.[method]?.operationId) {
+      return oldPathItem[method].operationId
+    }
+
+    // If not found, try to find by matching operationId pattern
+    // This helps when method or path changes but we want to preserve the ID
+    for (const oldPath in oldSpec.paths) {
+      const oldPathItem = oldSpec.paths[oldPath]
+      for (const oldMethod of ['get', 'post', 'put', 'delete', 'patch', 'options', 'head']) {
+        const oldOperation = oldPathItem[oldMethod]
+        if (oldOperation?.operationId) {
+          // If the summary matches, preserve the operationId
+          // This handles cases where only the method or path changed
+          if (operation.summary && oldOperation.summary === operation.summary) {
+            return oldOperation.operationId
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Generate a stable operationId from method, path, and operation details
+   */
+  private generateOperationId(method: string, path: string, operation: any): string {
+    // Strategy 1: Use summary if available (most descriptive)
+    if (operation.summary) {
+      const cleanSummary = operation.summary
+        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
+        .replace(/\s+/g, ' ')           // Normalize spaces
+        .trim()
+        .split(' ')
+        .map((word: string, index: number) => 
+          index === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        )
+        .join('')
+
+      if (cleanSummary.length > 0) {
+        return cleanSummary
+      }
+    }
+
+    // Strategy 2: Generate from method + path (fallback)
+    const cleanPath = path
+      .replace(/\{[^}]*\}/g, '')      // Remove path parameters completely
+      .replace(/[^a-zA-Z0-9\/]/g, '') // Remove special chars except /
+      .split('/')
+      .filter(segment => segment.length > 0)
+      .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase())
+      .join('')
+
+    const methodName = method.toLowerCase()
+    
+    if (cleanPath.length > 0) {
+      return `${methodName}${cleanPath}`
+    }
+
+    // Strategy 3: Last resort - method + hash
+    const pathHash = this.simpleHash(path).toString(16).substring(0, 6)
+    return `${methodName}${pathHash}`
+  }
+
+  /**
+   * Simple hash function for generating unique IDs
+   */
+  private simpleHash(str: string): number {
+    let hash = 0
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i)
+      hash = (hash << 5) - hash + char
+      hash = hash & 0xffffffff // Convert to 32-bit integer
+    }
+    return Math.abs(hash)
   }
 
   /**
