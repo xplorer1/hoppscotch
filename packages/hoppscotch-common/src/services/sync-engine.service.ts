@@ -1075,12 +1075,19 @@ export class SyncEngineService {
   }
 
   private normalizeEndpointPath(path: string): string {
-    return (
-      (path || "")
-        .replace(/{{baseURL}}/g, "")
-        .replace(/^\/+/, "/")
-        .replace(/\/+$/, "") || "/"
-    )
+    let normalized = (path || "")
+      // Remove {{baseURL}} variable
+      .replace(/{{baseURL}}/g, "")
+      // Remove full URLs (http://host:port or https://host:port)
+      .replace(/^https?:\/\/[^\/]+/i, "")
+      // Normalize path parameters: convert both {param} and <<param>> to a common format
+      // Convert Hoppscotch format <<param>> to OpenAPI format {param}
+      .replace(/<<([^>]+)>>/g, "{$1}")
+      // Normalize slashes
+      .replace(/^\/+/, "/")
+      .replace(/\/+$/, "")
+    
+    return normalized || "/"
   }
 
   private getCollectionEndpointSummary(
@@ -1127,6 +1134,8 @@ export class SyncEngineService {
     // Normalize matchPath (remove {baseURL} and extra slashes, exact match preferred)
     const normalizedMatchPath = this.normalizeEndpointPath(matchPath)
 
+    console.log(`[findRequestInCollection] Looking for: method=${method}, path="${normalizedMatchPath}"`)
+
     // If method is "ANY", we're doing a path-only match (ignore method)
     const matchAnyMethod = method === "ANY"
 
@@ -1152,6 +1161,8 @@ export class SyncEngineService {
           normalizedMatchPath === requestPath + "/" ||
           (requestPath.includes(normalizedMatchPath) &&
             normalizedMatchPath.length > 3) // Only use contains for substantial paths
+
+        console.log(`[findRequestInCollection] Checking folder ${folderIndex}, request ${i}: "${request.name}" method=${request.method}, path="${requestPath}", matchesMethod=${matchesMethod}, matchesPath=${matchesPath}`)
 
         if (matchesMethod && matchesPath) {
           return { request, folderPath: folderIndex, requestIndex: i }
@@ -1222,6 +1233,10 @@ export class SyncEngineService {
     const removals = changes.filter((c) => c.type === "endpoint-removed")
     const additions = changes.filter((c) => c.type === "endpoint-added")
 
+    console.log(`[detectUrlChanges] Found ${removals.length} removals and ${additions.length} additions`)
+    removals.forEach(r => console.log(`  Removal: ${r.path}`))
+    additions.forEach(a => console.log(`  Addition: ${a.path}`))
+
     for (const removal of removals) {
       const [removedMethod, removedPath] = removal.path.split(" ", 2)
 
@@ -1255,12 +1270,18 @@ export class SyncEngineService {
 
         // Prefer matches with same operationId/summary, but also accept URL/method changes
         // when they're the only removal+addition pair for that method or path
+        console.log(`[detectUrlChanges] Comparing: ${removal.path} vs ${addition.path}`)
+        console.log(`  isMethodChange: ${isMethodChange}, isUrlChange: ${isUrlChange}, isCombinedChange: ${isCombinedChange}`)
+        console.log(`  sameOperationId: ${sameOperationId}, sameSummary: ${sameSummary}`)
+        console.log(`  oldOp.summary: "${oldOp?.summary}", newOp.summary: "${newOp?.summary}"`)
+        
         if (
           (isUrlChange || isMethodChange || isCombinedChange) &&
           (sameOperationId ||
             sameSummary ||
             this.isLikelyUrlChange(removal, addition, removals, additions))
         ) {
+          console.log(`[detectUrlChanges] MATCHED! ${removal.path} -> ${addition.path}`)
           urlChanges.set(removal.path, {
             oldPath: removedPath,
             newPath: addedPath,
@@ -1352,6 +1373,10 @@ export class SyncEngineService {
     spec: any,
     sourceId?: string
   ): Promise<{ updated: boolean; found: boolean }> {
+    console.log(`[handleUrlChange] Processing URL change:`)
+    console.log(`  Old: ${urlChange.oldMethod} ${urlChange.oldPath}`)
+    console.log(`  New: ${urlChange.newMethod} ${urlChange.newPath}`)
+    
     // Find the existing request by old path and method
     const oldEndpointPath = `${urlChange.oldMethod} ${urlChange.oldPath}`
     const resolvedSourceId = sourceId || collection.liveMetadata?.sourceId || ""
@@ -1486,6 +1511,11 @@ export class SyncEngineService {
     }
 
     const { request, folderPath, requestIndex } = existingRequestInfo
+    console.log(`[handleUrlChange] Found existing request:`)
+    console.log(`  Name: ${request.name}`)
+    console.log(`  Method: ${request.method}`)
+    console.log(`  Endpoint: ${request.endpoint}`)
+    console.log(`  FolderPath: ${folderPath}, RequestIndex: ${requestIndex}`)
 
     // Create updated request with new path/method, preserving responses
     const updatedRequest = this.createRequestFromSpec(
@@ -1494,28 +1524,47 @@ export class SyncEngineService {
       urlChange.operation,
       spec
     )
+    console.log(`[handleUrlChange] Created updated request:`)
+    console.log(`  Method: ${updatedRequest.method}`)
+    console.log(`  Endpoint: ${updatedRequest.endpoint}`)
+    
     updatedRequest.responses = request.responses || {} // Preserve existing responses
 
     // Update name intelligently - same logic as updateEndpointInCollection
     // Check if the old name matches what the old spec would have generated
     const oldExpectedName = `${urlChange.oldMethod} ${urlChange.oldPath}` // Fallback if no summary
-    const wasNameFromSpec =
-      request.name === oldExpectedName ||
-      request.name.includes(urlChange.oldMethod) ||
-      request.name.includes(urlChange.oldPath.split("/").pop() || "")
-
+    
     // Get the new expected name from the operation
     const newExpectedName =
       urlChange.operation.summary ||
       urlChange.operation.operationId ||
       `${urlChange.newMethod} ${urlChange.newPath}`
 
-    if (wasNameFromSpec) {
-      // Name came from spec, update it with new summary/operationId
+    // Determine if the name should be updated:
+    // 1. If the name matches the old method+path format (auto-generated fallback)
+    // 2. If the name contains the old method (likely auto-generated)
+    // 3. If the new summary is different from the current name (spec changed the summary)
+    // 4. Always update if the new operation has a summary (prefer spec-defined names)
+    const wasNameFromSpec =
+      request.name === oldExpectedName ||
+      request.name.includes(urlChange.oldMethod)
+    
+    // Check if the summary actually changed in the spec
+    const summaryChanged = urlChange.operation.summary && request.name !== urlChange.operation.summary
+    
+    console.log(`[handleUrlChange] Name update check:`)
+    console.log(`  Current name: "${request.name}"`)
+    console.log(`  New expected name: "${newExpectedName}"`)
+    console.log(`  wasNameFromSpec: ${wasNameFromSpec}, summaryChanged: ${summaryChanged}`)
+
+    if (wasNameFromSpec || summaryChanged) {
+      // Name came from spec or summary changed, update it with new summary/operationId
       updatedRequest.name = newExpectedName
+      console.log(`  -> Updating name to: "${newExpectedName}"`)
     } else {
-      // Name was customized, preserve it
+      // Name was customized and summary didn't change, preserve it
       updatedRequest.name = request.name
+      console.log(`  -> Preserving existing name: "${request.name}"`)
     }
 
     // Update the request in place
@@ -1523,7 +1572,9 @@ export class SyncEngineService {
       folderPath !== undefined
         ? `${collectionIndex}/${folderPath}`
         : collectionIndex.toString()
+    console.log(`[handleUrlChange] Calling editRESTRequest with path: ${fullPath}, index: ${requestIndex}`)
     editRESTRequest(fullPath, requestIndex, updatedRequest)
+    console.log(`[handleUrlChange] Request updated successfully!`)
 
     return { updated: true, found: true }
   }
